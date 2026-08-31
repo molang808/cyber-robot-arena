@@ -178,8 +178,13 @@ const upgCount=document.getElementById('upg-count');
 const layers={s:document.getElementById('sl'),sh:document.getElementById('shl'),u:document.getElementById('ugl'),g:document.getElementById('gol')};
 
 // Perma data
-let pd=JSON.parse(localStorage.getItem('ca4'))||{credits:0,hpL:0,spL:0,mgL:0,cbL:0,dmL:0,auL:0,startHpL:0,orbL:0,expL:0,reloadL:0};
-const sP=()=>localStorage.setItem('ca4',JSON.stringify(pd));
+// 저장소가 막힌 환경(샌드박스 iframe, data: URL, 쿠키 차단)에서도 게임은 돌아가야 한다.
+// 실패하면 메모리 진행도로 후퇴한다 — 판은 정상 진행되고 영구 강화만 저장되지 않는다.
+const PD0={credits:0,hpL:0,spL:0,mgL:0,cbL:0,dmL:0,auL:0,startHpL:0,orbL:0,expL:0,reloadL:0};
+let stOK=true;
+let pd=(()=>{try{const r=localStorage.getItem('ca4');return r?{...PD0,...JSON.parse(r)}:{...PD0};}
+  catch(e){stOK=false;return {...PD0};}})();
+const sP=()=>{if(!stOK)return;try{localStorage.setItem('ca4',JSON.stringify(pd));}catch(e){stOK=false;}};
 
 // State
 let gR=false,score=0,wave=1,kills=0,bossKills=0,cE=0,luS=0,aId,shK=0,fC=0;
