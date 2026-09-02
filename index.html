@@ -93,7 +93,7 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
 <div id="gc">
   <canvas id="cv"></canvas>
   <div class="hud">
-    <div class="hud-l"><div id="sc">0</div><div id="wv">WAVE 1</div><div id="cr">&#127885; 0</div></div>
+    <div class="hud-l"><div id="sc">0</div><div id="wv">WAVE 1</div><div id="tm">10:00</div><div id="cr">&#127885; 0</div></div>
     <div class="hud-r"><div class="hp-w"><div class="hp-l">INTEGRITY</div><div class="hp-ps" id="hps"></div></div><div id="wd">WEAPON: <span id="wn">PISTOL</span></div></div>
   </div>
   <div id="ae"></div>
@@ -136,9 +136,10 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
 
   <!-- GAMEOVER -->
   <div class="ul hidden" id="gol"><div class="sc2">
-    <div class="st" style="color:var(--dan)">SYSTEM FAILURE</div>
-    <div class="ss">전투 보고서</div>
+    <div class="st" id="gt" style="color:var(--dan)">SYSTEM FAILURE</div>
+    <div class="ss" id="gsub">전투 보고서</div>
     <table class="tbl">
+      <tr><td>생존 시간</td><td id="ft">0:00</td></tr>
       <tr><td>최종 점수</td><td id="fs">0</td></tr>
       <tr><td>최고 웨이브</td><td id="fw">0</td></tr>
       <tr><td>처치 수</td><td id="fk">0</td></tr>
@@ -171,6 +172,7 @@ cv.width=W;cv.height=H;
 const scE=document.getElementById('sc'),wvE=document.getElementById('wv'),crE=document.getElementById('cr');
 const hpsE=document.getElementById('hps'),aeE=document.getElementById('ae'),wnE=document.getElementById('wn');
 const tcdE=document.getElementById('tcd'),scdE=document.getElementById('scd');
+const tmE=document.getElementById('tm');
 const bossWarnE=document.getElementById('boss-warn');
 const freezeOverlay=document.getElementById('freeze-overlay');
 const upgLog=document.getElementById('upgrade-log');
@@ -194,6 +196,11 @@ let gameT=0;
 // 성장 통화. 점수와 달리 콤보 배수가 붙지 않는다.
 // 점수는 자랑용 지표로 두고, 업그레이드 속도는 실제 처치 수에만 비례시킨다.
 let xp=0;
+// 런 종료 조건. 플레이어 성장에는 상한이 없으므로 런 자체에 끝을 둔다.
+// 파워 커브를 억누르는 대신 시간을 잠그는 쪽이 성장의 쾌감을 해치지 않는다.
+const RUN_SEC=600;    // 10분 생존하면 클리어
+const PURGE_SEC=480;  // 8분에 말소 프로토콜 — 최종 유닛 등장 (격파 창 120초)
+let purgeSpawned=false,purgeKilled=false;
 let combo=0,comboTimer=0,maxCombo=0,comboMultiplier=1;
 let floatTexts=[];  // floating damage/score text
 let dashCooldown=0; // space dash
@@ -292,7 +299,7 @@ function dOb(i){
   if(ob.typ==='bomber'){spB(ob.x,ob.y,'#ff9e00',28);for(let j=obs.length-1;j>=0;j--){if(j!==i&&j<obs.length&&dst(ob.x,ob.y,obs[j].x,obs[j].y)<80){obs[j].hp-=3;if(obs[j].hp<=0)dOb(j);}}}
   if(its.length<30&&Math.random()<.3)its.push(new Item());
   if(ob.isBoss&&Math.random()<.7)for(let k=0;k<3&&its.length<30;k++)its.push(new Item());
-  const basePts=ob.isBoss?(ob.isMega?500:200):ob.typ==='tank'?60:ob.typ==='fast'?35:ob.typ==='bomber'?40:20;
+  const basePts=ob.isPurge?2000:ob.isBoss?(ob.isMega?500:200):ob.typ==='tank'?60:ob.typ==='fast'?35:ob.typ==='bomber'?40:20;
   // Combo system
   combo++;comboTimer=120;
   if(combo>maxCombo)maxCombo=combo;
@@ -305,6 +312,7 @@ function dOb(i){
   const comboTxt=combo>=5?`x${combo} COMBO! +${pts}`:`+${pts}`;
   floatTexts.push({x:ob.x,y:ob.y,txt:comboTxt,life:60,
     col:combo>=10?'#ffd60a':combo>=5?'#c77dff':'#00ffe7',size:combo>=10?18:combo>=5?14:11});
+  if(ob.isPurge)purgeKilled=true;
   if(ob.isBoss)bossKills++;
   scE.textContent=score;
   if(player&&player.lc&&Math.random()<.1){player.hp=Math.min(player.hp+1,player.mhp);uHP();}
@@ -563,15 +571,19 @@ class Player{
 
 // ── OBSTACLE ──────────────────────────────────────────────
 class Obstacle{
-  constructor(diff,isBoss=false,isMega=false){
-    this.isBoss=isBoss;this.isMega=isMega;
-    if(isMega){
+  constructor(diff,isBoss=false,isMega=false,isPurge=false){
+    this.isBoss=isBoss||isPurge;this.isMega=isMega||isPurge;this.isPurge=isPurge;
+    if(isPurge){
+      this.size=95;this.spd=(1.8+Math.random()*.6)*Math.min(diff,5);
+      this.hp=Math.floor(900+gameT*6);this.mhp=this.hp;   // 540초에 4,140 — 같은 시점 메가(2,240)의 약 1.8배
+      this.col='#ff2d55';this.typ='mega';
+    } else if(isMega){
       this.size=75+gameT*.11;this.spd=(.8+Math.random()*.5)*Math.min(diff*.4,2);
-      this.hp=Math.floor(80+gameT*4);this.mhp=this.hp;
+      this.hp=Math.floor(80+gameT*2.4);this.mhp=this.hp;
       this.col='#ff2d55';this.typ='mega';
     } else if(isBoss){
       this.size=50+gameT*.15;this.spd=(1.2+Math.random()*.8)*Math.min(diff*.65,3.2);
-      this.hp=Math.floor(30+gameT*1.5);this.mhp=this.hp;
+      this.hp=Math.floor(30+gameT*0.8);this.mhp=this.hp;
       this.col='#ff9500';this.typ='boss';
     } else {
       this.size=16+Math.random()*26;
@@ -645,7 +657,7 @@ class Obstacle{
       ctx.restore();ctx.save();ctx.translate(this.x,this.y);
       ctx.fillStyle=this.isMega?'#ff2d55':'#ffd60a';
       ctx.font=`bold ${this.isMega?16:12}px monospace`;ctx.textAlign='center';
-      ctx.fillText(this.isMega?'★MEGA★':'★BOSS',0,-s-18);
+      ctx.fillText(this.isPurge?'☠ PURGE ☠':this.isMega?'★MEGA★':'★BOSS',0,-s-18);
     }
     ctx.restore();
   }
@@ -741,6 +753,15 @@ function gLoop(ts=0){
   if(lastTime>500&&delta>250){aId=requestAnimationFrame(gLoop);return;}
   fC++;if(fC>200000)fC=1;
   gameT=fC/60;   // 게임 전체가 프레임 기반이므로 시계도 프레임에서 뽑는다
+  const left=Math.max(0,RUN_SEC-gameT);
+  tmE.textContent=`${Math.floor(left/60)}:${String(Math.floor(left%60)).padStart(2,'0')}`;
+  tmE.style.color=left<=60?'var(--dan)':'rgba(255,255,255,0.4)';
+  if(gameT>=PURGE_SEC&&!purgeSpawned){
+    purgeSpawned=true;
+    obs.push(new Obstacle(1+gameT*.013,false,false,true));
+    showBossWarn('☠ PURGE PROTOCOL ☠','#ff2d55');shK=24;
+  }
+  if(gameT>=RUN_SEC){ctx.restore();runClear();return;}
   wave=1+Math.floor(gameT/15);wvE.textContent=`WAVE ${wave}`;
 
   // Upgrade milestone (increases after 2000pts)
@@ -1036,7 +1057,7 @@ function uHP(){
 function startGame(){
   gR=true;score=0;xp=0;wave=1;kills=0;bossKills=0;cE=0;luS=0;fC=0;shK=0;
   nextUpgradeScore=Math.max(180,200-pd.expL*10);
-  gameT=0;nextBossAt=60;nextMegaAt=180;bossActive=false;bossKillCount=0;
+  gameT=0;purgeSpawned=false;purgeKilled=false;nextBossAt=60;nextMegaAt=180;bossActive=false;bossKillCount=0;
   scE.textContent='0';crE.textContent='\uD83D\uDCAB 0';
   obs=[];its=[];parts=[];buls=[];bms=[];floatTexts=[];
   combo=0;comboTimer=0;maxCombo=0;comboMultiplier=1;dashCooldown=0;
@@ -1054,11 +1075,9 @@ function startGame(){
   aId=requestAnimationFrame(gLoop);
 }
 
-function gameOver(){
-  gR=false;cancelAnimationFrame(aId);
-  if(freezeTimer)clearInterval(freezeTimer);
-  isFrozen=false;freezeOverlay.classList.remove('show');
-  pd.credits+=cE;sP();
+function fillReport(){
+  const mm=Math.floor(gameT/60),ss=String(Math.floor(gameT%60)).padStart(2,'0');
+  document.getElementById('ft').textContent=`${mm}:${ss}`;
   document.getElementById('fs').textContent=score;
   document.getElementById('fw').textContent=wave;
   document.getElementById('fk').textContent=kills;
@@ -1066,6 +1085,38 @@ function gameOver(){
   document.getElementById('fc').textContent=cE;
   const mcEl=document.getElementById('fmc');
   if(mcEl)mcEl.textContent=maxCombo;
+}
+
+function runClear(){
+  gR=false;cancelAnimationFrame(aId);
+  if(freezeTimer)clearInterval(freezeTimer);
+  isFrozen=false;freezeOverlay.classList.remove('show');
+  cE=Math.floor(cE*(purgeKilled?2:1.5));   // 클리어 보너스 (완전 제압이면 2배)
+  pd.credits+=cE;pd.clears=(pd.clears||0)+1;
+  if(purgeKilled)pd.purges=(pd.purges||0)+1;
+  sP();
+  fillReport();
+  const t=document.getElementById('gt');
+  t.textContent=purgeKilled?'PURGE ELIMINATED':'PROTOCOL SURVIVED';
+  t.style.color=purgeKilled?'var(--gld)':'var(--acc)';
+  document.getElementById('gsub').textContent=purgeKilled
+    ? `최종 유닛 격파 — 완전 제압 (누적 ${pd.purges}회)`
+    : `10분 생존 — 클리어 (누적 ${pd.clears}회)`;
+  layers.g.classList.remove('hidden');
+  const em=document.getElementById('emer');
+  em.style.opacity='0';em.style.pointerEvents='none';
+  if(emerTimer)clearTimeout(emerTimer);
+}
+
+function gameOver(){
+  gR=false;cancelAnimationFrame(aId);
+  if(freezeTimer)clearInterval(freezeTimer);
+  isFrozen=false;freezeOverlay.classList.remove('show');
+  pd.credits+=cE;sP();
+  fillReport();
+  const t=document.getElementById('gt');
+  t.textContent='SYSTEM FAILURE';t.style.color='var(--dan)';
+  document.getElementById('gsub').textContent='전투 보고서';
   layers.g.classList.remove('hidden');
   const em=document.getElementById('emer');
   em.style.opacity='0';em.style.pointerEvents='none';

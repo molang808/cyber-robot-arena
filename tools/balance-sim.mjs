@@ -16,7 +16,7 @@
  *   node tools/balance-sim.mjs --csv > out.csv
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -39,6 +39,13 @@ function loadUpgrades() {
 
 // ── 게임 상수 (index.html과 동일하게 유지할 것) ─────────────────
 const RARITY_WEIGHT = { common: 10, rare: 4, epic: 2, legendary: 1 };
+
+// 런 종료 조건 (index.html과 동일하게 유지할 것)
+const RUN_SEC = 600;      // 10분 생존 = 클리어
+const PURGE_SEC = 480;    // 8분에 최종 유닛 등장
+const purgeHP = t => Math.floor(900 + t * 6);
+const megaHP  = t => Math.floor(80 + t * 2.4);
+const bossHP  = t => Math.floor(30 + t * 0.8);
 const CRIT_CHANCE = 0.15;
 const CRIT_MULT = 2.5;
 const CRIT_AVG = 1 - CRIT_CHANCE + CRIT_CHANCE * CRIT_MULT; // 1.225
@@ -197,7 +204,17 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
 
     samples.push({ t, score, xp, dps, headroom, spd: p.spd, fastSpd: pr.fastSpd, picks, wave: pr.wave, comboMult });
   }
-  return { samples, breakPoint, final: p, picks };
+  // 최종 유닛 격파 가능성 — 등장 시점의 DPS로 남은 창 안에 잡을 수 있는가.
+  // 잡몹도 상대해야 하므로 화력의 절반만 최종 유닛에 쓴다고 본다.
+  const atPurge = samples[Math.min(PURGE_SEC, samples.length) - 1];
+  let purge = null;
+  if (atPurge) {
+    const dpsOnPurge = atPurge.dps * 0.5;   // 잡몹도 상대하므로 화력의 절반만 최종 유닛에
+    const ttk = purgeHP(PURGE_SEC) / dpsOnPurge;
+    purge = { dps: atPurge.dps, ttk, killable: ttk <= RUN_SEC - PURGE_SEC,
+              megaTtk: megaHP(PURGE_SEC) / dpsOnPurge, bossTtk: bossHP(PURGE_SEC) / dpsOnPurge };
+  }
+  return { samples, breakPoint, final: p, picks, purge };
 }
 
 // ── 실행 ──────────────────────────────────────────────────────
@@ -217,13 +234,58 @@ const flag = (name, def) => {
 };
 const RUNS = Number(flag('runs', 200));
 const STRATEGY = flag('strategy', 'random');
-const SECONDS = Number(flag('seconds', 900));
+const SECONDS = Number(flag('seconds', RUN_SEC));
 const ACCURACY = Number(flag('accuracy', DEFAULT_ACCURACY));
 const COMBO_ON = !args.includes('--no-combo');
 const AS_CSV = args.includes('--csv');
 const SWEEP = args.includes('--sweep');
 
 const upgrades = loadUpgrades();
+
+// ── 캠페인: 명중률 × 선택전략 전 조합을 돌려 데이터셋을 남긴다 ──
+if (args.includes('--campaign')) {
+  const ACCS = [0.15, 0.25, 0.35, 0.5, 0.75, 1.0];
+  const STRATS = ['random', 'greedy'];
+  const med = a => { const x = [...a].sort((m, n) => m - n); return x.length ? x[Math.floor(x.length / 2)] : NaN; };
+  const rows = [];
+  console.log(`\n  밸런스 캠페인 — ${ACCS.length * STRATS.length}개 조합 × ${RUNS}판 × ${RUN_SEC}초\n`);
+  console.log('  전략     명중률  업글@600  DPS@600  여유@180  여유@600  최종유닛격파  메가TTK  일반TTK');
+  console.log('  ' + '─'.repeat(88));
+  for (const strat of STRATS) {
+    for (const acc of ACCS) {
+      const rs = [];
+      for (let i = 0; i < RUNS; i++)
+        rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: acc, combo: true }));
+      const at = k => rs.map(r => r.samples[k - 1]).filter(Boolean);
+      const pg = rs.map(r => r.purge).filter(Boolean);
+      const row = {
+        strategy: strat, accuracy: acc,
+        picks600: med(at(600).map(s => s.picks)),
+        dps600: +med(at(600).map(s => s.dps)).toFixed(1),
+        head180: +med(at(180).map(s => s.headroom)).toFixed(2),
+        head600: +med(at(600).map(s => s.headroom)).toFixed(2),
+        purgeKillRate: +(pg.filter(x => x.killable).length / pg.length * 100).toFixed(0),
+        megaTtk: Math.round(med(pg.map(x => x.megaTtk))),
+        bossTtk: Math.round(med(pg.map(x => x.bossTtk))),
+      };
+      rows.push(row);
+      const warn = row.megaTtk > 180 || row.bossTtk > 60 ? '  ← 보스 누적' : '';
+      console.log(`  ${strat.padEnd(8)} ${(acc * 100).toFixed(0).padStart(5)}% ${String(row.picks600).padStart(9)} ` +
+        `${String(row.dps600).padStart(8)} ${String(row.head180).padStart(9)} ${String(row.head600).padStart(9)} ` +
+        `${String(row.purgeKillRate + '%').padStart(13)} ${String(row.megaTtk).padStart(8)} ${String(row.bossTtk).padStart(8)}${warn}`);
+    }
+    console.log('');
+  }
+  const header = 'strategy,accuracy,picks_at_600s,dps_at_600s,headroom_at_180s,headroom_at_600s,purge_kill_rate_pct,mega_ttk_sec,boss_ttk_sec';
+  const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+  const out = join(HERE, '..', 'docs', 'balance-data.csv');
+  try {
+    mkdirSync(join(HERE, '..', 'docs'), { recursive: true });
+    writeFileSync(out, csv + '\n');
+    console.log(`  데이터셋 저장: docs/balance-data.csv (${rows.length}행, 조합당 ${RUNS}판)\n`);
+  } catch (e) { console.log('  CSV 저장 실패:', e.message); }
+  process.exit(0);
+}
 
 if (SWEEP) {
   console.log(`\n  명중률 민감도 스윕 — ${RUNS}판씩, 판당 ${Math.floor(SECONDS / 60)}분, 전략 ${STRATEGY}\n`);
@@ -289,6 +351,16 @@ for (const t of [30, 60, 120, 180, 300, 450, 600, 900].filter(x => x <= SECONDS)
     `${dps.toFixed(1).padStart(11)} ${(pr.spawnPerSec * pr.avgHP).toFixed(1).padStart(8)} ` +
     `${hr.toFixed(2).padStart(10)}x ${spd.toFixed(2).padStart(12)} ${pr.fastSpd.toFixed(2).padStart(12)}${mark}`
   );
+}
+
+// 최종 유닛 격파 가능성
+const pgs = runs.map(r => r.purge).filter(Boolean);
+if (pgs.length) {
+  const killable = pgs.filter(x => x.killable).length;
+  console.log(`\n  최종 유닛 (${PURGE_SEC}초 등장, HP ${purgeHP(PURGE_SEC).toLocaleString()}, 격파 창 ${RUN_SEC - PURGE_SEC}초)`);
+  console.log(`    격파 가능한 판: ${killable}/${pgs.length} (${(killable / pgs.length * 100).toFixed(0)}%)`);
+  console.log(`    처치 소요 시간 중앙값: ${median(pgs.map(x => x.ttk)).toFixed(0)}초`);
+  console.log(`    같은 시점 참고 — 메가 보스 ${median(pgs.map(x => x.megaTtk)).toFixed(0)}초 / 일반 보스 ${median(pgs.map(x => x.bossTtk)).toFixed(0)}초`);
 }
 
 const bps = runs.map(r => r.breakPoint).filter(Boolean);
