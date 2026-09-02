@@ -40,6 +40,16 @@ function loadUpgrades() {
 // ── 게임 상수 (index.html과 동일하게 유지할 것) ─────────────────
 const RARITY_WEIGHT = { common: 10, rare: 4, epic: 2, legendary: 1 };
 
+// 곱연산으로 DPS에 직접 곱해지는 축. 이 셋이 서로 곱해지면서 발산한다.
+const MULT_AXES = new Set(['damage_up', 'multishot', 'fire_rate']);
+
+// 게임에서 중첩 상한을 읽어온다 — 손으로 동기화하지 않는다
+function loadStackMax() {
+  const m = readFileSync(GAME, 'utf8').match(/const STACK_MAX\s*=\s*(\d+)/);
+  return m ? Number(m[1]) : Infinity;
+}
+const GAME_STACK_MAX = loadStackMax();
+
 // 런 종료 조건 (index.html과 동일하게 유지할 것)
 const RUN_SEC = 600;      // 10분 생존 = 클리어
 const PURGE_SEC = 480;    // 8분에 최종 유닛 등장
@@ -62,21 +72,30 @@ const ENEMY_MIX = [
  * 무기별 "1회 발사당 총 데미지" — fire()에서 그대로 옮긴 계수.
  * 빔 계열(laser/rail/chain)은 mk()를 거치지 않으므로 크리티컬이 붙지 않는다.
  */
+/**
+ * hit — 무기별 유효 명중 계수. 전역 명중률에 곱해진다.
+ *
+ * 확산탄을 한 방향으로 뿌리는 무기는 발사한 탄환이 전부 표적에 닿지 않는다.
+ * flame은 ±0.55rad(±31°) 랜덤 확산에 탄 수명도 짧고, shotgun은 7방향으로 갈라진다.
+ * 반대로 빔·유도·연쇄 계열은 표적을 직접 노리므로 손실이 거의 없다.
+ * 정확한 값은 실측이 필요하지만, 전역 명중률 하나로 모든 무기를 같게 두면
+ * 확산 무기의 DPS가 구조적으로 과대평가된다.
+ */
 const WEAPON_DPS = {
-  //            발사당 데미지                        크리 적용 여부
-  pistol:   { dmg: (d, xb) => d * 0.6  * (1 + xb),        crit: true  },
-  plasma:   { dmg: (d, xb) => d * 2.5  * (1 + xb),        crit: true  },
-  shotgun:  { dmg: (d, xb) => d * (7 + xb),               crit: true  },
-  laser:    { dmg: (d)     => d * 5,                      crit: false },
-  dualgun:  { dmg: (d, xb) => d * 0.8  * (2 + xb),        crit: true  },
-  sniper:   { dmg: (d)     => d * 4,                      crit: true  },
-  flame:    { dmg: (d, xb) => d * 1.4 * Math.min(8 + xb * 2, 16), crit: true },
-  ricochet: { dmg: (d)     => d,                          crit: true  },
-  missile:  { dmg: (d, xb) => d * 7 * (1 + xb),           crit: true  },
-  rail:     { dmg: (d)     => d * 9,                      crit: false },
-  gatling:  { dmg: (d, xb) => d * 0.7 * (1 + xb),         crit: true  },
-  cannon:   { dmg: (d)     => d * 5,                      crit: false },
-  chain:    { dmg: (d, xb) => d * (4 + xb),               crit: false },
+  //          발사당 데미지                                     크리    유효명중  다중타격
+  pistol:   { dmg: (d, xb) => d * 0.6  * (1 + xb),        crit: true,  hit: 1.0,  multi: 1.0 },
+  plasma:   { dmg: (d, xb) => d * 2.1  * (1 + xb),        crit: true,  hit: 0.95, multi: 2.0 },
+  shotgun:  { dmg: (d, xb) => d * 1.75 * (7 + xb),               crit: true,  hit: 0.5,  multi: 1.0 },
+  laser:    { dmg: (d)     => d * 6.9,                   crit: false, hit: 1.0,  multi: 3.0 },
+  dualgun:  { dmg: (d, xb) => d * 0.86 * (2 + xb),        crit: true,  hit: 0.95, multi: 1.0 },
+  sniper:   { dmg: (d)     => d * 8.4,                      crit: true,  hit: 1.0,  multi: 2.5 },
+  flame:    { dmg: (d, xb) => d * 0.42 * Math.min(8 + xb * 2, 16), crit: true, hit: 0.3, multi: 1.0 },
+  ricochet: { dmg: (d)     => d * 2.1,                          crit: true,  hit: 1.0,  multi: 4.0 },
+  missile:  { dmg: (d, xb) => d * 1.65 * (1 + xb),           crit: true,  hit: 1.0,  multi: 2.0 },
+  rail:     { dmg: (d)     => d * 5.8,                      crit: false, hit: 1.0,  multi: 4.0 },
+  gatling:  { dmg: (d, xb) => d * 0.75 * (1 + xb),         crit: true,  hit: 0.85, multi: 1.0 },
+  cannon:   { dmg: (d)     => d * 11,                      crit: false, hit: 1.0,  multi: 3.0 },
+  chain:    { dmg: (d, xb) => d * 2.7 * (4 + xb),               crit: false, hit: 1.0,  multi: 1.0 },
 };
 
 // ── 플레이어 초기 상태 (Player 생성자, 영구 강화 0단계 기준) ────
@@ -86,6 +105,7 @@ function newPlayer() {
     wt: 'pistol', gc: 22, xb: 0, bsp: 10, rad: 16, mgR: 80, cm: 1,
     pr: false, hm: false, ae: false, lc: false,
     sm: 1, shB: 0, rr: 0,
+    gcBase: 22,
     orbBlades: 0, coldField: false, berserker: false, phoenix: false,
     mirrorShield: false, comboBoost: false, vampire: false,
     superMagnet: false, bombDrop: false, drone: false,
@@ -95,7 +115,7 @@ function newPlayer() {
 // ── 파생 지표 ─────────────────────────────────────────────────
 function playerDPS(p) {
   const w = WEAPON_DPS[p.wt] ?? WEAPON_DPS.pistol;
-  const perShot = w.dmg(p.bd, p.xb) * (w.crit ? CRIT_AVG : 1);
+  const perShot = w.dmg(p.bd, p.xb) * (w.crit ? CRIT_AVG : 1) * (w.hit ?? 1) * (w.multi ?? 1);
   const shotsPerSec = 60 / p.gc;
   let dps = perShot * shotsPerSec;
   // 무기와 무관한 지속 피해원
@@ -131,13 +151,45 @@ function pressure(t) {
 }
 
 // ── 업그레이드 드래프트 (showUpg의 추첨 규칙과 동일) ────────────
-function draft(upgrades, takenIds, rng) {
+/**
+ * 성장 상한 정책
+ *   none      기준선 — 상한 없음
+ *   slots:N   총 획득 개수를 N개로 제한 (뱀서의 무기6+패시브6에 해당)
+ *   stack:K   같은 업그레이드를 최대 K회까지만
+ *   decay     중첩할수록 등장 가중치가 w/(1+획득횟수)로 감소
+ */
+function parseCap(str) {
+  if (!str || str === 'none') return { mode: 'none', label: 'none' };
+  const [mode, arg] = str.split(':');
+  if (mode === 'slots') return { mode, n: Number(arg || 20), label: `slots:${arg || 20}` };
+  if (mode === 'stack') return { mode, k: Number(arg || 5), label: `stack:${arg || 5}` };
+  if (mode === 'decay') return { mode, label: 'decay' };
+  // wfloor — 쿨다운 하한을 무기 고유 쿨다운의 40%로 둔다.
+  // 전역 쿨다운 감소가 무기별 밸런스(느리고 강함 vs 빠르고 약함)를 무너뜨리는 것을 막는다.
+  if (mode === 'wfloor') return { mode, ratio: Number(arg || 0.4), label: `wfloor:${arg || 0.4}` };
+  if (mode === 'wfloor+stack') return { mode: 'wfloor', ratio: 0.4, stackK: Number(arg || 5), label: `wfloor+stack:${arg || 5}` };
+  // mult — 곱연산 DPS 축(데미지·탄환수·연사)만 K회로 제한하는 비대칭 정책.
+  // 방어·유틸 업그레이드는 그대로 두므로 선택을 분산하는 플레이어는 거의 영향받지 않고,
+  // 한 축에 몰아넣는 최적화 플레이어만 걸린다.
+  if (mode === 'mult') return { mode, k: Number(arg || 3), label: `mult:${arg || 3}` };
+  if (mode === 'mult+wfloor') return { mode: 'mult', k: Number(arg || 3), wfloor: 0.4, label: `mult:${arg || 3}+wfloor` };
+  throw new Error(`알 수 없는 상한 정책: ${str}`);
+}
+
+function draft(upgrades, takenIds, counts, rng, cap) {
   const available = upgrades.filter(u => {
     if (u.once && takenIds.has(u.id)) return false;
     if (u.req && !takenIds.has(u.req)) return false;
+    if (cap.mode === 'stack' && (counts.get(u.id) || 0) >= cap.k) return false;
+    if (cap.stackK && (counts.get(u.id) || 0) >= cap.stackK) return false;
+    if (cap.mode === 'mult' && MULT_AXES.has(u.id) && (counts.get(u.id) || 0) >= cap.k) return false;
     return true;
   });
-  const pool = available.flatMap(u => Array(RARITY_WEIGHT[u.r] ?? 5).fill(u));
+  const pool = available.flatMap(u => {
+    let w = RARITY_WEIGHT[u.r] ?? 5;
+    if (cap.mode === 'decay') w = Math.max(1, Math.round(w / (1 + (counts.get(u.id) || 0))));
+    return Array(w).fill(u);
+  });
   const sel = [], used = new Set();
   let tries = 0;
   while (sel.length < 3 && tries < 400) {
@@ -167,9 +219,10 @@ function choose(cards, player, strategy, rng) {
 const upgGap = score => (score < 2000 ? 200 : 200 + Math.floor((score - 2000) / 500) * 50);
 
 // ── 한 판 시뮬레이션 ──────────────────────────────────────────
-function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAULT_ACCURACY, combo: comboOn = true }) {
+function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAULT_ACCURACY, combo: comboOn = true, cap = { mode: 'none' } }) {
   const p = newPlayer();
   const taken = new Set();
+  const counts = new Map();
   let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0), picks = 0;
   const samples = [];
   let breakPoint = null;   // 처리량 여유가 3배를 넘어선 첫 시점
@@ -196,9 +249,20 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
     }
 
     while (xp >= nextUpg) {
-      const cards = draft(upgrades, taken, rng);
+      if (cap.mode === 'slots' && picks >= cap.n) { nextUpg = Infinity; break; }
+      const cards = draft(upgrades, taken, counts, rng, cap);
       const pick = choose(cards, p, strategy, rng);
-      if (pick) { try { pick.ef(p); } catch {} taken.add(pick.id); picks++; }
+      if (pick) {
+        const wtBefore = p.wt;
+        try { pick.ef(p); } catch {}
+        // 무기를 새로 집으면 그 무기의 고유 쿨다운을 기준값으로 기록한다
+        if (p.wt !== wtBefore) p.gcBase = p.gc;
+        const wf = cap.mode === 'wfloor' ? cap.ratio : cap.wfloor;
+        if (wf) p.gc = Math.max(p.gc, Math.ceil((p.gcBase ?? 22) * wf));
+        taken.add(pick.id);
+        counts.set(pick.id, (counts.get(pick.id) || 0) + 1);
+        picks++;
+      }
       nextUpg = xp + upgGap(xp);
     }
 
@@ -239,8 +303,93 @@ const ACCURACY = Number(flag('accuracy', DEFAULT_ACCURACY));
 const COMBO_ON = !args.includes('--no-combo');
 const AS_CSV = args.includes('--csv');
 const SWEEP = args.includes('--sweep');
+const CAP = parseCap(flag('cap', `stack:${GAME_STACK_MAX}`));   // 기본값은 게임의 실제 설정
 
 const upgrades = loadUpgrades();
+
+// ── 진단: 무기별 고유 DPS 편차 ──
+if (args.includes('--weapons')) {
+  const BASE_GC = { pistol:22, plasma:20, shotgun:32, laser:44, dualgun:20, sniper:55,
+                    flame:4, ricochet:22, missile:26, rail:50, gatling:5, cannon:45, chain:22 };
+  const bd = Number(flag('bd', 5)), xb = Number(flag('xb', 2));
+  console.log(`\n  무기별 고유 DPS — 데미지 bd=${bd}, 추가탄환 xb=${xb}, 각 무기 고유 쿨다운, 연사 업그레이드 없음\n`);
+  console.log('  무기        쿨다운   초당발사   발사당(유효)      DPS   기준 대비');
+  console.log('  ' + '─'.repeat(64));
+  const rows = Object.keys(BASE_GC).map(wt => {
+    const w = WEAPON_DPS[wt], gc = BASE_GC[wt];
+    const per = w.dmg(bd, xb) * (w.crit ? CRIT_AVG : 1) * (w.hit ?? 1) * (w.multi ?? 1);
+    return { wt, gc, rate: 60 / gc, per, dps: per * (60 / gc) };
+  }).sort((a, b) => b.dps - a.dps);
+  const lo = rows[rows.length - 1].dps;
+  for (const r of rows)
+    console.log(`  ${r.wt.padEnd(10)} ${String(r.gc).padStart(5)}f ${r.rate.toFixed(1).padStart(9)} ` +
+      `${r.per.toFixed(1).padStart(14)} ${r.dps.toFixed(0).padStart(8)} ${(r.dps / lo).toFixed(1).padStart(9)}x`);
+  console.log(`\n  최고/최저 = ${(rows[0].dps / lo).toFixed(1)}배 (${rows[0].wt} / ${rows[rows.length-1].wt})`);
+  const mid = rows[Math.floor(rows.length/2)].dps;
+  console.log(`  중앙값 ${mid.toFixed(0)} DPS 대비 최고 ${(rows[0].dps/mid).toFixed(1)}배\n`);
+  process.exit(0);
+}
+
+// ── 진단: greedy가 실제로 무엇을 쌓는지 ──
+if (args.includes('--inspect')) {
+  const med = a => { const x=[...a].sort((m,n)=>m-n); return x[Math.floor(x.length/2)]; };
+  for (const capStr of ['none','slots:16','stack:3','decay']) {
+    const rs=[];
+    for (let i=0;i<RUNS;i++)
+      rs.push(simulate(upgrades,{strategy:'greedy',rng:mulberry32(i*7919+13),maxSeconds:RUN_SEC,accuracy:0.35,combo:true,cap:parseCap(capStr)}));
+    const f = rs.map(r=>r.final);
+    const wc={}; f.forEach(x=>wc[x.wt]=(wc[x.wt]||0)+1);
+    const topW = Object.entries(wc).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([w,n])=>`${w} ${Math.round(n/RUNS*100)}%`).join(', ');
+    console.log(`\n  [${capStr}]  최종 빌드 중앙값`);
+    console.log(`    데미지 bd=${med(f.map(x=>x.bd))}  추가탄환 xb=${med(f.map(x=>x.xb))}  쿨다운 gc=${med(f.map(x=>x.gc))}프레임 (초당 ${(60/med(f.map(x=>x.gc))).toFixed(1)}발)`);
+    console.log(`    주 무기: ${topW}`);
+    const p0 = f[0];
+    console.log(`    예시 DPS 분해: ${p0.wt} → 발사당 ${WEAPON_DPS[p0.wt] ? WEAPON_DPS[p0.wt].dmg(p0.bd,p0.xb).toFixed(0) : '?'} × 초당 ${(60/p0.gc).toFixed(1)}발`);
+  }
+  process.exit(0);
+}
+
+// ── 상한 정책 비교: 무제한 성장을 어떤 방식으로 막을지 데이터로 고른다 ──
+if (args.includes('--compare-caps')) {
+  const CAPS = args.includes('--caps') ? flag('caps','').split(',') : ['none', 'slots:20', 'stack:3', 'decay', 'mult:1', 'mult:2', 'mult:3', 'mult+wfloor:2', 'mult+wfloor:3'];
+  const med = a => { const x = [...a].sort((m, n) => m - n); return x.length ? x[Math.floor(x.length / 2)] : NaN; };
+  const run = (cap, strat, acc) => {
+    const rs = [];
+    for (let i = 0; i < RUNS; i++)
+      rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: acc, combo: true, cap: parseCap(cap) }));
+    const at600 = rs.map(r => r.samples[RUN_SEC - 1]).filter(Boolean);
+    const pg = rs.map(r => r.purge).filter(Boolean);
+    return {
+      dps: med(at600.map(s => s.dps)),
+      head: med(at600.map(s => s.headroom)),
+      picks: med(at600.map(s => s.picks)),
+      purge: pg.filter(x => x.killable).length / pg.length * 100,
+    };
+  };
+  console.log(`\n  성장 상한 정책 비교 — 정책 ${CAPS.length}종 × ${RUNS}판, 명중률 35%, 10분\n`);
+  console.log('  정책        │ random DPS  여유  격파 │ greedy DPS   여유  격파 │ greedy/random  판정');
+  console.log('  ' + '─'.repeat(92));
+  const rows = [];
+  for (const cap of CAPS) {
+    const r = run(cap, 'random', 0.35), g = run(cap, 'greedy', 0.35);
+    const ratio = g.dps / r.dps;
+    // 판정 기준: random이 놀 만한 구간(여유 0.3~1.5)에 있고, greedy가 그 5배 안쪽
+    const ok = r.head >= 0.3 && r.head <= 1.5 && ratio <= 5;
+    rows.push({ cap, rDps: +r.dps.toFixed(1), rHead: +r.head.toFixed(2), rPurge: Math.round(r.purge),
+                gDps: +g.dps.toFixed(1), gHead: +g.head.toFixed(2), gPurge: Math.round(g.purge),
+                ratio: +ratio.toFixed(1), picks: g.picks });
+    console.log(`  ${cap.padEnd(11)} │ ${r.dps.toFixed(1).padStart(10)} ${r.head.toFixed(2).padStart(5)} ${(Math.round(r.purge)+'%').padStart(5)} │` +
+      ` ${g.dps.toFixed(1).padStart(10)} ${g.head.toFixed(2).padStart(6)} ${(Math.round(g.purge)+'%').padStart(5)} │` +
+      ` ${(ratio.toFixed(1)+'x').padStart(13)}  ${ok ? '✅' : '❌'}`);
+  }
+  const header = 'cap_policy,random_dps,random_headroom,random_purge_pct,greedy_dps,greedy_headroom,greedy_purge_pct,greedy_over_random,greedy_picks';
+  const csv = [header, ...rows.map(r => Object.values(r).join(','))].join('\n');
+  mkdirSync(join(HERE, '..', 'docs'), { recursive: true });
+  writeFileSync(join(HERE, '..', 'docs', 'cap-policy-data.csv'), csv + '\n');
+  console.log(`\n  판정 기준: random 처리량 여유 0.3~1.5 (놀 만한 구간) + greedy/random 배율 5배 이하`);
+  console.log(`  데이터셋 저장: docs/cap-policy-data.csv\n`);
+  process.exit(0);
+}
 
 // ── 캠페인: 명중률 × 선택전략 전 조합을 돌려 데이터셋을 남긴다 ──
 if (args.includes('--campaign')) {
@@ -255,7 +404,7 @@ if (args.includes('--campaign')) {
     for (const acc of ACCS) {
       const rs = [];
       for (let i = 0; i < RUNS; i++)
-        rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: acc, combo: true }));
+        rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: acc, combo: true, cap: CAP }));
       const at = k => rs.map(r => r.samples[k - 1]).filter(Boolean);
       const pg = rs.map(r => r.purge).filter(Boolean);
       const row = {
@@ -295,7 +444,7 @@ if (SWEEP) {
     for (const acc of [0.15, 0.25, 0.35, 0.5, 0.75, 1.0]) {
       const rs = [];
       for (let i = 0; i < RUNS; i++)
-        rs.push(simulate(upgrades, { strategy: STRATEGY, rng: mulberry32(i * 7919 + 13), maxSeconds: SECONDS, accuracy: acc, combo }));
+        rs.push(simulate(upgrades, { strategy: STRATEGY, rng: mulberry32(i * 7919 + 13), maxSeconds: SECONDS, accuracy: acc, combo, cap: CAP }));
       const at300 = rs.map(r => r.samples[Math.min(299, SECONDS - 1)]).filter(Boolean);
       const med = a => { const s2 = [...a].sort((x, y) => x - y); return s2[Math.floor(s2.length / 2)]; };
       const broke = rs.filter(r => r.breakPoint).length;
@@ -312,7 +461,7 @@ if (SWEEP) {
 
 const runs = [];
 for (let i = 0; i < RUNS; i++) {
-  runs.push(simulate(upgrades, { strategy: STRATEGY, rng: mulberry32(i * 7919 + 13), maxSeconds: SECONDS, accuracy: ACCURACY, combo: COMBO_ON }));
+  runs.push(simulate(upgrades, { strategy: STRATEGY, rng: mulberry32(i * 7919 + 13), maxSeconds: SECONDS, accuracy: ACCURACY, combo: COMBO_ON, cap: CAP }));
 }
 
 const median = arr => {
