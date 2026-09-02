@@ -188,6 +188,12 @@ const sP=()=>{if(!stOK)return;try{localStorage.setItem('ca4',JSON.stringify(pd))
 
 // State
 let gR=false,score=0,wave=1,kills=0,bossKills=0,cE=0,luS=0,aId,shK=0,fC=0;
+// 난이도 시계 — 점수가 아니라 경과 시간(초)에 종속된다.
+// 점수는 콤보 배수로 부풀려지므로 난이도 기준으로 쓰면 잘하는 플레이어가 더 빨리 처벌받는다.
+let gameT=0;
+// 성장 통화. 점수와 달리 콤보 배수가 붙지 않는다.
+// 점수는 자랑용 지표로 두고, 업그레이드 속도는 실제 처치 수에만 비례시킨다.
+let xp=0;
 let combo=0,comboTimer=0,maxCombo=0,comboMultiplier=1;
 let floatTexts=[];  // floating damage/score text
 let dashCooldown=0; // space dash
@@ -293,7 +299,7 @@ function dOb(i){
   const comboDivider=(player&&player.comboBoost)?2.5:5;
   comboMultiplier=1+Math.floor(combo/comboDivider)*0.2;
   const pts=Math.floor(basePts*comboMultiplier);
-  score+=pts;kills++;
+  score+=pts;xp+=basePts;kills++;
   if(kills%15===0&&kills>0)floatTexts.push({txt:`🔥 ${kills} KILLS!`,x:W/2,y:H/2-40,life:100,col:'#ffd60a',size:20});
   // Float text
   const comboTxt=combo>=5?`x${combo} COMBO! +${pts}`:`+${pts}`;
@@ -407,8 +413,8 @@ class Player{
     };
     const wt=this.wt;
     if(wt==='pistol'){
-      buls.push(mk(a,spd,dmg*.35,4,'#a8edff'));
-      if(this.xb>0)for(let i=0;i<this.xb;i++)buls.push(mk(a+(i+1)*.25*(i%2?-1:1),spd,dmg*.35,4,'#a8edff'));
+      buls.push(mk(a,spd,dmg*.6,4,'#a8edff'));
+      if(this.xb>0)for(let i=0;i<this.xb;i++)buls.push(mk(a+(i+1)*.25*(i%2?-1:1),spd,dmg*.6,4,'#a8edff'));
     } else if(wt==='plasma'){
       const b=mk(a,spd,dmg*2.5,9,'#ff6b35');b.explosive=true;buls.push(b);
       for(let i=0;i<this.xb;i++){const b2=mk(a+(i+1)*.32*(i%2?-1:1),spd,dmg*2.5,9,'#ff6b35');b2.explosive=true;buls.push(b2);}
@@ -560,12 +566,12 @@ class Obstacle{
   constructor(diff,isBoss=false,isMega=false){
     this.isBoss=isBoss;this.isMega=isMega;
     if(isMega){
-      this.size=75+score*.002;this.spd=(.8+Math.random()*.5)*Math.min(diff*.4,2);
-      this.hp=Math.floor(80+score*.07);this.mhp=this.hp;
+      this.size=75+gameT*.11;this.spd=(.8+Math.random()*.5)*Math.min(diff*.4,2);
+      this.hp=Math.floor(80+gameT*4);this.mhp=this.hp;
       this.col='#ff2d55';this.typ='mega';
     } else if(isBoss){
-      this.size=50+score*.003;this.spd=(1.2+Math.random()*.8)*Math.min(diff*.65,3.2);
-      this.hp=Math.floor(30+score*.028);this.mhp=this.hp;
+      this.size=50+gameT*.15;this.spd=(1.2+Math.random()*.8)*Math.min(diff*.65,3.2);
+      this.hp=Math.floor(30+gameT*1.5);this.mhp=this.hp;
       this.col='#ff9500';this.typ='boss';
     } else {
       this.size=16+Math.random()*26;
@@ -694,18 +700,18 @@ function drawBG(){
 }
 
 // ── BOSS SPAWN ────────────────────────────────────────────
-let nextBossAt=1000,nextMegaAt=5000,bossActive=false,bossKillCount=0;
+let nextBossAt=60,nextMegaAt=180,bossActive=false,bossKillCount=0;   // 초 단위
 function checkBossSpawn(){
-  // Boss: every 1000pts, fixed target — not offset from current score
-  if(!bossActive && score>=nextBossAt){
+  // Boss: 60초마다
+  if(!bossActive && gameT>=nextBossAt){
     bossActive=true;
-    obs.push(new Obstacle(1+score*.0003,true,false));
+    obs.push(new Obstacle(1+gameT*.013,true,false));
     showBossWarn('★ BOSS INCOMING ★','#ff9500');
   }
-  // Mega: every 5000pts starting at 5000
-  if(score>=nextMegaAt){
-    nextMegaAt+=5000;
-    obs.push(new Obstacle(1+score*.0003,true,true));
+  // Mega: 180초마다
+  if(gameT>=nextMegaAt){
+    nextMegaAt+=180;
+    obs.push(new Obstacle(1+gameT*.013,true,true));
     showBossWarn('★★ MEGA BOSS ★★','#ff2d55');
   }
   // Reset bossActive when all bosses dead → schedule next boss
@@ -715,7 +721,7 @@ function checkBossSpawn(){
     if(!hasBoss){
       bossActive=false;
       bossKillCount++;
-      nextBossAt=score+1000;  // next boss 1000pts after kill
+      nextBossAt=gameT+60;  // 처치 60초 뒤 다음 보스
     }
   }
 }
@@ -734,14 +740,15 @@ function gLoop(ts=0){
   const delta=ts-lastTime;lastTime=ts;
   if(lastTime>500&&delta>250){aId=requestAnimationFrame(gLoop);return;}
   fC++;if(fC>200000)fC=1;
-  wave=1+Math.floor(score/300);wvE.textContent=`WAVE ${wave}`;
+  gameT=fC/60;   // 게임 전체가 프레임 기반이므로 시계도 프레임에서 뽑는다
+  wave=1+Math.floor(gameT/15);wvE.textContent=`WAVE ${wave}`;
 
   // Upgrade milestone (increases after 2000pts)
-  const upgGap=score<2000?200:200+Math.floor((score-2000)/500)*50;
+  const upgGap=xp<2000?200:200+Math.floor((xp-2000)/500)*50;
   if(nextUpgradeScore<=0)nextUpgradeScore=upgGap;
-  if(score>=luS+nextUpgradeScore){ctx.restore();showUpg();return;}
+  if(xp>=luS+nextUpgradeScore){ctx.restore();showUpg();return;}
 
-  const diff=1+score*.00035;
+  const diff=1+gameT*.012;
   ctx.save();
   if(shK>0){ctx.translate((Math.random()-.5)*shK,(Math.random()-.5)*shK);shK*=.82;}
   drawBG();
@@ -946,8 +953,8 @@ function gLoop(ts=0){
 
 // ── UPGRADE SCREEN ─────────────────────────────────────────
 function showUpg(){
-  gR=false;cancelAnimationFrame(aId);luS=score;
-  const upgGap=score<2000?200:200+Math.floor((score-2000)/500)*50;
+  gR=false;cancelAnimationFrame(aId);luS=xp;
+  const upgGap=xp<2000?200:200+Math.floor((xp-2000)/500)*50;
   nextUpgradeScore=upgGap;
   layers.u.classList.remove('hidden');
   const div=document.getElementById('ugo');div.innerHTML='';
@@ -1027,9 +1034,9 @@ function uHP(){
 }
 
 function startGame(){
-  gR=true;score=0;wave=1;kills=0;bossKills=0;cE=0;luS=0;fC=0;shK=0;
+  gR=true;score=0;xp=0;wave=1;kills=0;bossKills=0;cE=0;luS=0;fC=0;shK=0;
   nextUpgradeScore=Math.max(180,200-pd.expL*10);
-  nextBossAt=1000;nextMegaAt=5000;bossActive=false;bossKillCount=0;
+  gameT=0;nextBossAt=60;nextMegaAt=180;bossActive=false;bossKillCount=0;
   scE.textContent='0';crE.textContent='\uD83D\uDCAB 0';
   obs=[];its=[];parts=[];buls=[];bms=[];floatTexts=[];
   combo=0;comboTimer=0;maxCombo=0;comboMultiplier=1;dashCooldown=0;
