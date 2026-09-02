@@ -575,7 +575,7 @@ class Obstacle{
     this.isBoss=isBoss||isPurge;this.isMega=isMega||isPurge;this.isPurge=isPurge;
     if(isPurge){
       this.size=95;this.spd=(1.8+Math.random()*.6)*Math.min(diff,5);
-      this.hp=Math.floor(900+gameT*6);this.mhp=this.hp;   // 540초에 4,140 — 같은 시점 메가(2,240)의 약 1.8배
+      this.hp=Math.floor(900+gameT*6);this.mhp=this.hp;   // 480초에 3,780 — 같은 시점 메가(1,232)의 3.07배
       this.col='#ff2d55';this.typ='mega';
     } else if(isMega){
       this.size=75+gameT*.11;this.spd=(.8+Math.random()*.5)*Math.min(diff*.4,2);
