@@ -232,12 +232,12 @@ function choose(cards, player, strategy, rng) {
 const upgGap = score => (score < 2000 ? 200 : 200 + Math.floor((score - 2000) / 500) * 50);
 
 // ── 한 판 시뮬레이션 ──────────────────────────────────────────
-function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAULT_ACCURACY, combo: comboOn = true, cap = { mode: 'none' } }) {
+function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAULT_ACCURACY, combo: comboOn = true, cap = { mode: 'none' }, gapMul = 1 }) {
   const p = newPlayer();
   const taken = new Set();
   const counts = new Map();
   const evos = [];   // 진화 획득 기록 {id, t}
-  let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0), picks = 0, credits = 0, totalKills = 0;
+  let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0) * gapMul, picks = 0, credits = 0, totalKills = 0;
   const samples = [];
   let breakPoint = null;   // 처리량 여유가 3배를 넘어선 첫 시점
 
@@ -280,7 +280,7 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
         counts.set(pick.id, (counts.get(pick.id) || 0) + 1);
         picks++;
       }
-      nextUpg = xp + upgGap(xp);
+      nextUpg = xp + upgGap(xp) * gapMul;
     }
 
     samples.push({ t, score, xp, dps, headroom, spd: p.spd, fastSpd: pr.fastSpd, picks, wave: pr.wave, comboMult });
@@ -324,6 +324,90 @@ const SWEEP = args.includes('--sweep');
 const CAP = parseCap(flag('cap', `stack:${GAME_STACK_MAX}`));   // 기본값은 게임의 실제 설정
 
 const upgrades = loadUpgrades();
+
+// ── 카탈로그 크기 스윕 ──
+// 픽 수를 줄이지 않고 희소성을 올리는 대안: 카탈로그를 키운다.
+// 기존 스탯 업그레이드를 새 id로 복제해 분포를 유지한 채 크기만 늘린다.
+// 복제본은 각자 별도의 중첩 상한을 가지므로 파워 천장도 함께 오른다 — 그 대가를 함께 본다.
+if (args.includes('--catalog')) {
+  const med = a => { const x = [...a].sort((m, n) => m - n); return x.length ? x[Math.floor(x.length / 2)] : NaN; };
+  const clonable = upgrades.filter(u => !u.once && !u.req && !u.id.startsWith('ev_'));
+  const grow = n => {
+    const out = [...upgrades];
+    for (let i = 0; out.length < n; i++) {
+      const src2 = clonable[i % clonable.length];
+      out.push({ ...src2, id: `${src2.id}__c${Math.floor(i / clonable.length) + 1}` });
+    }
+    return out;
+  };
+  const run = (cat, strat) => {
+    const rs = [];
+    for (let i = 0; i < RUNS; i++)
+      rs.push(simulate(cat, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: 0.35, combo: true, cap: CAP }));
+    const at = rs.map(r => r.samples[RUN_SEC - 1]).filter(Boolean);
+    return { picks: med(at.map(s => s.picks)), distinct: med(rs.map(r => r.taken.size)),
+             dps: med(at.map(s => s.dps)), head: med(at.map(s => s.headroom)),
+             evo: rs.filter(r => r.evos.length > 0).length / rs.length * 100 };
+  };
+  console.log(`\n  카탈로그 크기 스윕 — ${RUNS}판씩, 픽 수는 그대로, 명중률 35%\n`);
+  console.log('  카탈로그  획득수  서로다른것  카탈로그  │ random DPS  여유  진화 │ greedy 여유  배율');
+  console.log('  ' + '─'.repeat(86));
+  for (const n of [upgrades.length, 60, 80, 100]) {
+    const cat = grow(n), r = run(cat, 'random'), g = run(cat, 'greedy');
+    console.log(`  ${String(n).padStart(8)} ${String(r.picks).padStart(7)} ${String(r.distinct).padStart(10)} ` +
+      `${String((r.distinct / n * 100).toFixed(0) + '%').padStart(8)}  │ ${r.dps.toFixed(1).padStart(10)} ` +
+      `${r.head.toFixed(2).padStart(5)} ${String(r.evo.toFixed(0) + '%').padStart(5)} │ ` +
+      `${g.head.toFixed(2).padStart(11)} ${(g.dps / r.dps).toFixed(1).padStart(5)}x`);
+  }
+  console.log('');
+  process.exit(0);
+}
+
+// ── 픽 수(업그레이드 간격) 스윕 ──
+// 판당 획득 수가 카탈로그 크기를 넘으면 후반에 사실상 다 먹게 되어 선택의 희소성이 사라진다.
+// 간격을 넓혔을 때 희소성과 파워·진화가 어떻게 맞바꿔지는지 본다.
+if (args.includes('--picks')) {
+  const MULS = [1, 1.25, 1.5, 2, 2.5, 3];
+  const med = a => { const x = [...a].sort((m, n) => m - n); return x.length ? x[Math.floor(x.length / 2)] : NaN; };
+  const CATALOG = upgrades.length;
+  const run = (mul, strat) => {
+    const rs = [];
+    for (let i = 0; i < RUNS; i++)
+      rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: 0.35, combo: true, cap: CAP, gapMul: mul }));
+    const at = rs.map(r => r.samples[RUN_SEC - 1]).filter(Boolean);
+    const pg = rs.map(r => r.purge).filter(Boolean);
+    return {
+      picks: med(at.map(s => s.picks)),
+      distinct: med(rs.map(r => r.taken.size)),
+      dps: med(at.map(s => s.dps)),
+      head: med(at.map(s => s.headroom)),
+      purge: pg.filter(x => x.killable).length / pg.length * 100,
+      evo: rs.filter(r => r.evos.length > 0).length / rs.length * 100,
+      mats: rs.filter(r => r.taken.has('shotgun') && r.taken.has('piercing')).length / rs.length * 100,
+    };
+  };
+  console.log(`\n  픽 수 스윕 — 간격 배수 ${MULS.length}종 × ${RUNS}판, 카탈로그 ${CATALOG}종, 명중률 35%\n`);
+  console.log('  간격   획득수  서로다른것  카탈로그  │ random DPS  여유  격파  진화 │ greedy 여유  배율');
+  console.log('  ' + '─'.repeat(94));
+  const rows = [];
+  for (const mul of MULS) {
+    const r = run(mul, 'random'), g = run(mul, 'greedy');
+    const cov = r.distinct / CATALOG * 100;
+    rows.push({ gap_mul: mul, picks: r.picks, distinct: r.distinct, coverage_pct: +cov.toFixed(0),
+      random_dps: +r.dps.toFixed(1), random_headroom: +r.head.toFixed(2), random_purge_pct: +r.purge.toFixed(0),
+      evolution_pct: +r.evo.toFixed(0), materials_pct: +r.mats.toFixed(0),
+      greedy_headroom: +g.head.toFixed(2), greedy_over_random: +(g.dps / r.dps).toFixed(1) });
+    console.log(`  ×${String(mul).padEnd(5)} ${String(r.picks).padStart(6)} ${String(r.distinct).padStart(10)} ` +
+      `${String(cov.toFixed(0) + '%').padStart(8)}  │ ${r.dps.toFixed(1).padStart(10)} ${r.head.toFixed(2).padStart(5)} ` +
+      `${String(r.purge.toFixed(0) + '%').padStart(5)} ${String(r.evo.toFixed(0) + '%').padStart(5)} │ ` +
+      `${g.head.toFixed(2).padStart(11)} ${(g.dps / r.dps).toFixed(1).padStart(5)}x`);
+  }
+  const header = Object.keys(rows[0]).join(',');
+  mkdirSync(join(HERE, '..', 'docs'), { recursive: true });
+  writeFileSync(join(HERE, '..', 'docs', 'pick-count-data.csv'), [header, ...rows.map(r => Object.values(r).join(','))].join('\n') + '\n');
+  console.log(`\n  데이터셋 저장: docs/pick-count-data.csv\n`);
+  process.exit(0);
+}
 
 // ── 진화 조합 확률 ──
 if (args.includes('--evolutions')) {
