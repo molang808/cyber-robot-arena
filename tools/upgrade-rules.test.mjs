@@ -97,3 +97,43 @@ test('중첩 상한 아래에서는 카탈로그가 3장을 뽑을 만큼 남아
   assert.equal(left.length, 0, '모두 소진되면 후보가 비어야 한다');
   assert.match(src, /if\(sel\.length===0\)/, 'showUpg에 후보 소진 처리가 있어야 한다');
 });
+
+// ── 해금 규칙 ────────────────────────────────────────────
+function loadUnlocks(pd) {
+  const start = src.indexOf('const UNLOCKS=[');
+  const end = src.indexOf('\n];', start);
+  return new Function('pd', `return ${src.slice(start + 'const UNLOCKS='.length, end + 3)}`)(pd);
+}
+const EMPTY_PD = { kills: 0, bosses: 0, clears: 0, best: 0, purges: 0 };
+
+test('해금: 신규 계정에서는 아무것도 열려 있지 않다', () => {
+  const U = loadUnlocks(EMPTY_PD);
+  assert.ok(U.length > 0);
+  for (const u of U) assert.ok(u.cur() < u.max, `${u.id}가 처음부터 충족돼 있다`);
+});
+
+test('해금: 조건을 넘기면 충족으로 판정된다', () => {
+  const U = loadUnlocks({ ...EMPTY_PD, kills: 5000, bosses: 10, clears: 1, best: 100000, purges: 1 });
+  for (const u of U) assert.ok(u.cur() >= u.max, `${u.id}가 조건 충족인데 미달로 나온다`);
+});
+
+test('해금: id는 중복되지 않고 목표치는 양수다', () => {
+  const U = loadUnlocks(EMPTY_PD);
+  assert.equal(new Set(U.map(u => u.id)).size, U.length);
+  for (const u of U) assert.ok(u.max > 0, `${u.id}의 목표치가 0 이하`);
+});
+
+test('해금: 무기 슬롯이 가리키는 무기가 fire()에 실제로 존재한다', () => {
+  for (const u of loadUnlocks(EMPTY_PD).filter(x => x.slot === 'w')) {
+    assert.ok(u.wt && u.gc > 0, `${u.id}에 wt/gc가 없다`);
+    assert.ok(src.includes(`wt==='${u.wt}'`), `fire()에 ${u.wt} 분기가 없다`);
+  }
+});
+
+test('해금: 슬롯은 무기(w)와 캐릭터(c)뿐이고, 슬롯별로 하나만 장착된다', () => {
+  const U = loadUnlocks(EMPTY_PD);
+  for (const u of U) if (u.slot) assert.ok(['w', 'c'].includes(u.slot), `${u.id}의 슬롯 '${u.slot}'`);
+  // 장착은 pd.eqW / pd.eqC 한 칸씩이라 구조적으로 중복 장착이 불가능하다
+  assert.match(src, /pd\.eqW=eq\?null:u\.id/);
+  assert.match(src, /pd\.eqC=eq\?null:u\.id/);
+});

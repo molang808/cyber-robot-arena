@@ -115,10 +115,19 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
     <div style="color:var(--gld);font-size:13px;margin-bottom:14px;font-family:'Orbitron',sans-serif;">&#127885; <span id="tcd">0</span></div>
     <button class="bp" id="stb">전투 시작</button>
     <button class="bs" id="shb">영구 상점</button>
+    <button class="bs" id="akb">아머리</button>
     <div class="dv"></div>
     <div id="career" style="font-size:10px;color:rgba(255,255,255,0.35);text-align:center;line-height:2.1;letter-spacing:1px;"></div>
     <div class="dv"></div>
     <div style="font-size:10px;color:rgba(255,255,255,0.2);text-align:center;line-height:2;letter-spacing:1px;">WASD / 방향키 이동 &nbsp;|&nbsp; 자동 공격 &nbsp;|&nbsp; M 음소거<br>10분 생존하면 클리어 &nbsp;|&nbsp; 8분에 최종 유닛 등장</div>
+  </div></div>
+
+  <!-- ARMORY -->
+  <div class="ul hidden" id="ukl"><div class="sc2">
+    <div class="st" style="color:var(--pur)">ARMORY</div>
+    <div class="ss">해금 — 수치가 아니라 새로운 것이 열린다</div>
+    <div id="uk-list" style="width:100%;max-width:430px;"></div>
+    <button class="bs" id="ukb">메인으로</button>
   </div></div>
 
   <!-- SHOP -->
@@ -150,6 +159,7 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
       <tr><td>획득 크레딧</td><td id="fc">0</td></tr>
       <tr><td>최고 콤보</td><td id="fmc">0</td></tr>
     </table>
+    <div id="newunlock" style="margin-top:10px;font-size:11px;color:var(--pur);text-align:center;line-height:1.8;"></div>
     <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;align-items:center;">
       <button class="bp" id="reb">완전 재도전</button>
       <button style="padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;border:none;border-radius:3px;cursor:pointer;transition:all .15s;margin:3px;background:rgba(199,125,255,0.15);color:var(--pur);border:1px solid rgba(199,125,255,0.4);" id="reb2">업그레이드 유지 재시작</button>
@@ -180,7 +190,7 @@ const bossWarnE=document.getElementById('boss-warn');
 const freezeOverlay=document.getElementById('freeze-overlay');
 const upgLog=document.getElementById('upgrade-log');
 const upgCount=document.getElementById('upg-count');
-const layers={s:document.getElementById('sl'),sh:document.getElementById('shl'),u:document.getElementById('ugl'),g:document.getElementById('gol')};
+const layers={s:document.getElementById('sl'),sh:document.getElementById('shl'),u:document.getElementById('ugl'),g:document.getElementById('gol'),k:document.getElementById('ukl')};
 
 // Perma data
 // 저장소가 막힌 환경(샌드박스 iframe, data: URL, 쿠키 차단)에서도 게임은 돌아가야 한다.
@@ -244,6 +254,33 @@ function startFreezeWatchdog(){
 // 데미지·탄환수·연사가 서로 곱해지는 구조라 중첩에 상한이 없으면 발산한다.
 // tools/balance-sim.mjs 가 이 값을 그대로 읽어 시뮬레이션한다.
 const STACK_MAX=3;
+
+// 해금 — 영구 상점이 전부 수치 증가라 쌓여도 질감이 없다.
+// 여기서는 새로운 시작 무기·캐릭터·규칙이 열린다.
+// 조건 판정에 쓰는 누적 기록은 recordRun()이 이미 쌓고 있다.
+const UNLOCKS=[
+  {id:'reroll',    icon:'🎲', name:'재추첨 모듈', desc:'판마다 업그레이드를 1회 다시 뽑는다',
+   goal:'누적 처치', max:5000,   cur:()=>Math.round(pd.kills||0)},
+  {id:'w_shotgun', icon:'💥', name:'산탄총 배치', desc:'산탄총을 들고 시작한다',
+   goal:'보스 처치', max:10,     cur:()=>pd.bosses||0, slot:'w', wt:'shotgun', gc:32},
+  {id:'c_heavy',   icon:'🛡️', name:'중장갑형',   desc:'최대 체력 +3, 이동 속도 −20%',
+   goal:'클리어',   max:1,      cur:()=>pd.clears||0, slot:'c'},
+  {id:'c_glass',   icon:'⚡', name:'경장갑형',   desc:'체력 1, 이동 속도 +40%, 탄환 데미지 +2',
+   goal:'최고 점수', max:100000, cur:()=>pd.best||0,   slot:'c'},
+  {id:'w_plasma',  icon:'🔥', name:'플라즈마 배치', desc:'플라즈마 캐논을 들고 시작한다',
+   goal:'완전 제압', max:1,      cur:()=>pd.purges||0, slot:'w', wt:'plasma', gc:20},
+];
+const isUnlocked=id=>(pd.unlocks||[]).includes(id);
+// 판이 끝날 때 호출. 새로 열린 것을 반환한다.
+function checkUnlocks(){
+  const newly=[];
+  for(const u of UNLOCKS){
+    if(!isUnlocked(u.id)&&u.cur()>=u.max){(pd.unlocks=pd.unlocks||[]).push(u.id);newly.push(u);}
+  }
+  if(newly.length)sP();
+  return newly;
+}
+let rerollLeft=0;
 
 // UPGRADES CATALOG
 const UPGRADES=[
@@ -1060,44 +1097,51 @@ function showUpg(){
   const upgGap=xp<2000?200:200+Math.floor((xp-2000)/500)*50;
   nextUpgradeScore=upgGap;
   layers.u.classList.remove('hidden');
-  const div=document.getElementById('ugo');div.innerHTML='';
-
-  // Filter: once upgrades already taken are excluded; req check
+  const div=document.getElementById('ugo');
   const stackCount=id=>appliedUpgradeLog.reduce((n,u)=>n+(u.id===id?1:0),0);
-  const available=UPGRADES.filter(u=>{
-    if(u.once&&appliedUpgradeIds.has(u.id))return false;
-    if(u.req&&!appliedUpgradeIds.has(u.req))return false;
-    if(!u.once&&stackCount(u.id)>=STACK_MAX)return false;   // 중첩 상한
-    return true;
-  });
+  const resume=()=>{layers.u.classList.add('hidden');gR=true;lastTime=0;aId=requestAnimationFrame(gLoop);};
 
-  const rw={common:10,rare:4,epic:2,legendary:1};
-  const pool=available.flatMap(u=>Array(rw[u.r]||5).fill(u));
-  const sel=[],used=new Set();let tr=0;
-  while(sel.length<3&&tr<400){tr++;if(!pool.length)break;const u=pool[Math.floor(Math.random()*pool.length)];if(!used.has(u.id)){used.add(u.id);sel.push(u);}}
+  // 재추첨이 같은 후보 규칙으로 다시 뽑을 수 있도록 한 번에 묶어둔다
+  const draw=()=>{
+    div.innerHTML='';
+    const available=UPGRADES.filter(u=>{
+      if(u.once&&appliedUpgradeIds.has(u.id))return false;
+      if(u.req&&!appliedUpgradeIds.has(u.req))return false;
+      if(!u.once&&stackCount(u.id)>=STACK_MAX)return false;   // 중첩 상한
+      return true;
+    });
+    const rw={common:10,rare:4,epic:2,legendary:1};
+    const pool=available.flatMap(u=>Array(rw[u.r]||5).fill(u));
+    const sel=[],used=new Set();let tr=0;
+    while(sel.length<3&&tr<400){tr++;if(!pool.length)break;const u=pool[Math.floor(Math.random()*pool.length)];if(!used.has(u.id)){used.add(u.id);sel.push(u);}}
+    if(sel.length===0){resume();return;}
 
-  if(sel.length===0){
-    // Nothing to show, just resume
-    layers.u.classList.add('hidden');gR=true;lastTime=0;aId=requestAnimationFrame(gLoop);return;
-  }
-
-  sel.forEach(u=>{
     const rc={common:'rc',rare:'rr',epic:'re',legendary:'rl'};
-    const card=document.createElement('div');card.className='uc';
-    const stk=u.once?'':` <span style="opacity:.5;font-size:10px">${stackCount(u.id)+1}/${STACK_MAX}</span>`;
-    card.innerHTML=`<div class="ui2">${u.icon}</div><div class="ui3"><div class="un">${u.name}${stk}</div><div class="ud">${u.desc}</div></div><div class="ur ${rc[u.r]}">${u.r.toUpperCase()}</div>`;
-    card.onclick=()=>{
-      SFX.upgrade();
-      u.ef(player);
-      appliedUpgradeIds.add(u.id);
-      appliedUpgradeLog.push(u);
-      addUpgradeLog(u);
-      wnE.textContent=player.wt.toUpperCase();
-      layers.u.classList.add('hidden');
-      gR=true;lastTime=0;aId=requestAnimationFrame(gLoop);
-    };
-    div.appendChild(card);
-  });
+    sel.forEach(u=>{
+      const card=document.createElement('div');card.className='uc';
+      const stk=u.once?'':` <span style="opacity:.5;font-size:10px">${stackCount(u.id)+1}/${STACK_MAX}</span>`;
+      card.innerHTML=`<div class="ui2">${u.icon}</div><div class="ui3"><div class="un">${u.name}${stk}</div><div class="ud">${u.desc}</div></div><div class="ur ${rc[u.r]}">${u.r.toUpperCase()}</div>`;
+      card.onclick=()=>{
+        SFX.upgrade();
+        u.ef(player);
+        appliedUpgradeIds.add(u.id);
+        appliedUpgradeLog.push(u);
+        addUpgradeLog(u);
+        wnE.textContent=player.wt.toUpperCase();
+        resume();
+      };
+      div.appendChild(card);
+    });
+
+    if(rerollLeft>0){
+      const b=document.createElement('button');
+      b.textContent=`🎲 재추첨 (${rerollLeft})`;
+      b.style.cssText="margin-top:10px;padding:6px 14px;font-family:'Share Tech Mono',monospace;font-size:11px;background:rgba(199,125,255,0.15);color:var(--pur);border:1px solid rgba(199,125,255,0.4);border-radius:3px;cursor:pointer;";
+      b.onclick=()=>{rerollLeft--;SFX.crit();draw();};
+      div.appendChild(b);
+    }
+  };
+  draw();
 }
 
 function addUpgradeLog(u){
@@ -1152,9 +1196,15 @@ function startGame(){
   upgLog.innerHTML='<div style="color:rgba(255,255,255,0.2);font-size:10px;padding:6px;">업그레이드를 선택하면<br>여기 표시됩니다.</div>';
   upgCount.textContent='0';
   player=new Player();
+  // 해금 장비 — 시작 무기와 캐릭터
+  const eqW=UNLOCKS.find(u=>u.id===pd.eqW&&u.slot==='w');
+  if(eqW&&isUnlocked(eqW.id)){player.wt=eqW.wt;player.gc=eqW.gc;}
+  if(pd.eqC==='c_heavy'&&isUnlocked('c_heavy')){player.mhp+=3;player.hp=player.mhp;player.spd*=0.8;}
+  else if(pd.eqC==='c_glass'&&isUnlocked('c_glass')){player.mhp=1;player.hp=1;player.spd*=1.4;player.bd+=2;}
+  rerollLeft=isUnlocked('reroll')?1:0;
   // Apply perma reload
   if(pd.reloadL>0)player.gc=Math.max(4,Math.floor(player.gc*(1-pd.reloadL*.05)));
-  uHP();wnE.textContent='PISTOL';
+  uHP();wnE.textContent=player.wt.toUpperCase();
   Object.values(layers).forEach(l=>l.classList.add('hidden'));
   lastTime=0;lastFrameTime=performance.now();
   startFreezeWatchdog();
@@ -1174,6 +1224,35 @@ function recordRun(){
   sP();
 }
 
+function showUnlocks(){
+  Object.values(layers).forEach(l=>l.classList.add('hidden'));
+  layers.k.classList.remove('hidden');
+  const list=document.getElementById('uk-list');list.innerHTML='';
+  UNLOCKS.forEach(u=>{
+    const got=isUnlocked(u.id);
+    const cur=Math.min(u.cur(),u.max),pct=Math.round(cur/u.max*100);
+    const eq=u.slot&&(u.slot==='w'?pd.eqW===u.id:pd.eqC===u.id);
+    const row=document.createElement('div');row.className='sr';
+    const info=document.createElement('div');info.style.flex='1';
+    info.innerHTML=`<div class="srn">${u.icon} ${u.name}${got?'':' <span style="opacity:.35">🔒</span>'}</div>`+
+      `<div class="srd">${u.desc}</div>`+
+      `<div class="srd" style="opacity:.5">${got?'해금됨':`${u.goal} ${cur.toLocaleString()} / ${u.max.toLocaleString()}`}</div>`+
+      `<div style="height:3px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:5px;">`+
+      `<div style="height:3px;width:${pct}%;background:${got?'var(--grn)':'var(--pur)'};border-radius:2px;"></div></div>`;
+    row.appendChild(info);
+    if(got&&u.slot){
+      const b=document.createElement('button');b.className='sb';
+      b.textContent=eq?'해제':'장착';
+      b.onclick=()=>{
+        if(u.slot==='w')pd.eqW=eq?null:u.id; else pd.eqC=eq?null:u.id;
+        sP();showUnlocks();
+      };
+      row.appendChild(b);
+    }
+    list.appendChild(row);
+  });
+}
+
 function renderCareer(){
   const el=document.getElementById('career');if(!el)return;
   const mm=Math.floor((pd.bestT||0)/60),ss=String((pd.bestT||0)%60).padStart(2,'0');
@@ -1189,6 +1268,9 @@ function renderCareer(){
 }
 
 function fillReport(){
+  const nu=checkUnlocks();
+  const el=document.getElementById('newunlock');
+  if(el)el.innerHTML=nu.length?nu.map(u=>`🔓 <b>${u.icon} ${u.name}</b> 해금 — ${u.desc}`).join('<br>'):'';
   const mm=Math.floor(gameT/60),ss=String(Math.floor(gameT%60)).padStart(2,'0');
   document.getElementById('ft').textContent=`${mm}:${ss}`;
   document.getElementById('fs').textContent=score;
@@ -1300,6 +1382,8 @@ document.getElementById('reb2').onclick=()=>{
   wnE.textContent=player.wt.toUpperCase();
 };
 document.getElementById('shb').onclick=showShop;
+document.getElementById('akb').onclick=showUnlocks;
+document.getElementById('ukb').onclick=()=>{layers.k.classList.add('hidden');layers.s.classList.remove('hidden');renderCareer();};
 document.getElementById('sbb').onclick=()=>{layers.sh.classList.add('hidden');layers.s.classList.remove('hidden');renderCareer();};
 document.getElementById('hob').onclick=()=>{layers.g.classList.add('hidden');layers.s.classList.remove('hidden');tcdE.textContent=pd.credits;renderCareer();};
 
