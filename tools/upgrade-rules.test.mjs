@@ -155,3 +155,40 @@ test('해금: 슬롯은 무기(w)와 캐릭터(c)뿐이고, 슬롯별로 하나�
   assert.match(src, /pd\.eqW=eq\?null:u\.id/);
   assert.match(src, /pd\.eqC=eq\?null:u\.id/);
 });
+
+// ── 자동 전투(방치) ───────────────────────────────────────
+const num = name => Number(src.match(new RegExp(`const ${name}=([0-9.]+)`))[1]);
+const IDLE_CAP_H = num('IDLE_CAP_H');
+const IDLE_CREDITS_PER_HOUR = num('IDLE_CREDITS_PER_HOUR');
+// balance-sim.mjs로 잰 액티브 플레이 실측치 (명중률 35%, 10분 완주)
+const ACTIVE_CREDITS_PER_RUN = 19258;
+
+function loadIdlePower(pd) {
+  const m = src.match(/function idlePower\(\)\{[\s\S]*?\n\}/);
+  return new Function('pd', `${m[0]}; return idlePower();`)(pd);
+}
+
+test('방치: 상한이 걸려 있고 시간당 수익이 양수다', () => {
+  assert.ok(IDLE_CAP_H > 0 && IDLE_CAP_H <= 24, `오프라인 상한 ${IDLE_CAP_H}시간`);
+  assert.ok(IDLE_CREDITS_PER_HOUR > 0);
+});
+
+test('방치: 상한까지 채워도 액티브 플레이가 확실히 유리하다', () => {
+  const maxIdle = IDLE_CAP_H * IDLE_CREDITS_PER_HOUR;   // 영구 강화 0단계 기준
+  assert.ok(maxIdle < ACTIVE_CREDITS_PER_RUN * 3,
+    `${IDLE_CAP_H}시간 방치(${maxIdle})가 액티브 3판(${ACTIVE_CREDITS_PER_RUN * 3})보다 많다`);
+});
+
+test('방치: 영구 강화에 투자할수록 자동 전투 효율이 오른다', () => {
+  const base = loadIdlePower({});
+  const invested = loadIdlePower({ dmL: 5, reloadL: 5, hpL: 5, spL: 5 });
+  assert.equal(base, 1, '투자 전 효율은 1이어야 한다');
+  assert.ok(invested > base, '투자해도 효율이 그대로다');
+});
+
+test('방치: 처치 기반 해금은 방치로도 진행되지만 클리어는 아니다', () => {
+  assert.match(src, /pd\.kills=\(pd\.kills\|\|0\)\+kills;/, '방치가 누적 처치를 올려야 한다');
+  const claim = src.match(/function claimIdle\(\)\{[\s\S]*?\n\}/)[0];
+  for (const k of ['clears', 'purges', 'best', 'bosses'])
+    assert.ok(!claim.includes(`pd.${k}=`), `방치가 pd.${k}를 건드리면 안 된다`);
+});
