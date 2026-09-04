@@ -192,3 +192,14 @@ test('방치: 처치 기반 해금은 방치로도 진행되지만 클리어는 
   for (const k of ['clears', 'purges', 'best', 'bosses'])
     assert.ok(!claim.includes(`pd.${k}=`), `방치가 pd.${k}를 건드리면 안 된다`);
 });
+
+test('진화: 조건부 카드라 개별 가중치를 갖는다', () => {
+  for (const e of UPGRADES.filter(u => u.id.startsWith('ev_')))
+    assert.ok(e.w && e.w > (RARITY_WEIGHT[e.r] ?? 5),
+      `${e.id}에 상향된 등장 가중치가 없다 — 재료를 갖춰도 카드가 안 뜬다`);
+});
+
+test('진화: 재료 힌트가 카드 렌더에 포함된다', () => {
+  assert.match(src, /진화 개방/, '진화 완성 힌트가 없다');
+  assert.match(src, /재료 —/, '재료 안내 힌트가 없다');
+});

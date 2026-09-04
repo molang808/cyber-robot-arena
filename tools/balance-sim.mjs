@@ -199,7 +199,7 @@ function draft(upgrades, takenIds, counts, rng, cap) {
     return true;
   });
   const pool = available.flatMap(u => {
-    let w = RARITY_WEIGHT[u.r] ?? 5;
+    let w = u.w ?? RARITY_WEIGHT[u.r] ?? 5;
     if (cap.mode === 'decay') w = Math.max(1, Math.round(w / (1 + (counts.get(u.id) || 0))));
     return Array(w).fill(u);
   });
@@ -236,6 +236,7 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
   const p = newPlayer();
   const taken = new Set();
   const counts = new Map();
+  const evos = [];   // 진화 획득 기록 {id, t}
   let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0), picks = 0, credits = 0, totalKills = 0;
   const samples = [];
   let breakPoint = null;   // 처리량 여유가 3배를 넘어선 첫 시점
@@ -274,6 +275,7 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
         if (p.wt !== wtBefore) p.gcBase = p.gc;
         const wf = cap.mode === 'wfloor' ? cap.ratio : cap.wfloor;
         if (wf) p.gc = Math.max(p.gc, Math.ceil((p.gcBase ?? 22) * wf));
+        if (pick.id.startsWith('ev_')) evos.push({ id: pick.id, t });
         taken.add(pick.id);
         counts.set(pick.id, (counts.get(pick.id) || 0) + 1);
         picks++;
@@ -293,7 +295,8 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
     purge = { dps: atPurge.dps, ttk, killable: ttk <= RUN_SEC - PURGE_SEC,
               megaTtk: megaHP(PURGE_SEC) / dpsOnPurge, bossTtk: bossHP(PURGE_SEC) / dpsOnPurge };
   }
-  return { samples, breakPoint, final: p, picks, purge, credits: Math.round(credits), kills: Math.round(totalKills) };
+  return { samples, breakPoint, final: p, picks, purge, evos, taken,
+           credits: Math.round(credits), kills: Math.round(totalKills) };
 }
 
 // ── 실행 ──────────────────────────────────────────────────────
@@ -321,6 +324,36 @@ const SWEEP = args.includes('--sweep');
 const CAP = parseCap(flag('cap', `stack:${GAME_STACK_MAX}`));   // 기본값은 게임의 실제 설정
 
 const upgrades = loadUpgrades();
+
+// ── 진화 조합 확률 ──
+if (args.includes('--evolutions')) {
+  const EV = upgrades.filter(u => u.id.startsWith('ev_'));
+  const med = a => { const x = [...a].sort((m, n) => m - n); return x.length ? x[Math.floor(x.length / 2)] : NaN; };
+  console.log(`\n  진화 조합 확률 — 조합 ${EV.length}종 × ${RUNS}판 × ${RUN_SEC}초, 명중률 35%\n`);
+  for (const strat of ['random', 'greedy']) {
+    const rs = [];
+    for (let i = 0; i < RUNS; i++)
+      rs.push(simulate(upgrades, { strategy: strat, rng: mulberry32(i * 7919 + 13), maxSeconds: RUN_SEC, accuracy: 0.35, combo: true, cap: CAP }));
+    const any = rs.filter(r => r.evos.length > 0).length;
+    console.log(`  [${strat}]  진화를 한 번이라도 본 판: ${any}/${RUNS} (${(any / RUNS * 100).toFixed(0)}%)`);
+    console.log('    진화형            재료 둘 다 획득   실제 진화   진화 시점(중앙값)');
+    console.log('    ' + '─'.repeat(64));
+    for (const e of EV) {
+      const mats = Array.isArray(e.req) ? e.req : [e.req];
+      const bothMat = rs.filter(r => mats.every(m => r.taken.has(m))).length;
+      const got = rs.filter(r => r.evos.some(x => x.id === e.id));
+      const tm = got.length ? `${Math.round(med(got.map(g => g.evos.find(x => x.id === e.id).t)))}초` : '—';
+      console.log(`    ${e.name.padEnd(16)} ${String((bothMat / RUNS * 100).toFixed(0) + '%').padStart(12)} ` +
+        `${String((got.length / RUNS * 100).toFixed(0) + '%').padStart(11)} ${tm.padStart(14)}`);
+    }
+    // 재료 자체를 얼마나 뽑는가
+    const matIds = [...new Set(EV.flatMap(e => Array.isArray(e.req) ? e.req : [e.req]))];
+    console.log('    재료 개별 획득률: ' + matIds.map(m =>
+      `${m} ${(rs.filter(r => r.taken.has(m)).length / RUNS * 100).toFixed(0)}%`).join(' · '));
+    console.log('');
+  }
+  process.exit(0);
+}
 
 // ── 진단: 무기별 고유 DPS 편차 ──
 if (args.includes('--weapons')) {
