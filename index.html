@@ -97,7 +97,8 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
     <div class="hud-r"><div class="hp-w"><div class="hp-l">INTEGRITY</div><div class="hp-ps" id="hps"></div></div><div id="wd">WEAPON: <span id="wn">PISTOL</span></div></div>
   </div>
   <div id="ae"></div>
-  <div id="ch">WASD 이동 &nbsp;|&nbsp; SPACE 대쉬(무적)</div>
+  <div id="ch">WASD 이동 &nbsp;|&nbsp; SPACE 대쉬(무적) &nbsp;|&nbsp; M 음소거</div>
+  <div id="mute" onclick="toggleMute()" style="position:absolute;top:8px;right:8px;z-index:16;cursor:pointer;font-size:14px;opacity:.5;">🔊</div>
   <!-- Emergency buttons -->
   <div id="emer" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px;z-index:15;opacity:0;transition:opacity .3s;pointer-events:none;">
     <button onclick="emergencyRestart(false)" style="padding:3px 8px;font-family:'Share Tech Mono',monospace;font-size:9px;background:rgba(199,125,255,0.2);color:#c77dff;border:1px solid rgba(199,125,255,0.4);border-radius:2px;cursor:pointer;">↺ 업그레이드유지</button>
@@ -292,6 +293,72 @@ const UPGRADES=[
   {id:'drone',name:'드론 소환',icon:'🤖',desc:'주위를 따라다니는 공격 드론',r:'legendary',once:true,ef:p=>p.drone=true},
 ];
 
+// ── AUDIO ─────────────────────────────────────────────────
+// 에셋 파일 없이 Web Audio로 직접 합성한다. 단일 HTML 원칙을 지키면서
+// 무음 게임 특유의 '밋밋함'을 없애는 것이 목적이다.
+// AudioContext는 브라우저 자동재생 정책 때문에 사용자 제스처 이후에만 만들 수 있다.
+let actx=null,mGain=null,noiseBuf=null;
+function initAudio(){
+  if(actx){if(actx.state==='suspended')actx.resume();return;}
+  try{
+    actx=new (window.AudioContext||window.webkitAudioContext)();
+    mGain=actx.createGain();mGain.gain.value=pd.mute?0:0.25;mGain.connect(actx.destination);
+  }catch(e){actx=null;}
+}
+function toggleMute(){
+  pd.mute=!pd.mute;sP();
+  if(mGain)mGain.gain.value=pd.mute?0:0.25;
+  const el=document.getElementById('mute');if(el)el.textContent=pd.mute?'🔇':'🔊';
+}
+function nBuf(){
+  if(!noiseBuf){const n=Math.floor(actx.sampleRate*0.4);noiseBuf=actx.createBuffer(1,n,actx.sampleRate);
+    const d=noiseBuf.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;}
+  return noiseBuf;
+}
+// 음정 하나 — 시작 주파수에서 끝 주파수로 미끄러지며 감쇠
+function tone(f,f2,dur,type,vol,delay){
+  if(!actx||pd.mute)return;
+  const t=actx.currentTime+(delay||0);
+  const osc=actx.createOscillator(),g=actx.createGain();
+  osc.type=type||'square';osc.frequency.setValueAtTime(f,t);
+  if(f2)osc.frequency.exponentialRampToValueAtTime(Math.max(20,f2),t+dur);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.linearRampToValueAtTime(vol,t+0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  osc.connect(g);g.connect(mGain);osc.start(t);osc.stop(t+dur+0.03);
+}
+// 노이즈 버스트 — 타격·폭발용
+function burst(f,dur,vol,delay){
+  if(!actx||pd.mute)return;
+  const t=actx.currentTime+(delay||0);
+  const src=actx.createBufferSource();src.buffer=nBuf();
+  const bp=actx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=f;bp.Q.value=1.2;
+  const g=actx.createGain();g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp);bp.connect(g);g.connect(mGain);src.start(t);src.stop(t+dur+0.02);
+}
+let lastShotSnd=0,lastKillSnd=0;
+const SFX={
+  shoot(){ const n=performance.now(); if(n-lastShotSnd<70)return; lastShotSnd=n;
+           tone(520,240,0.045,'square',0.10); },
+  hit(){   burst(2600,0.045,0.10); },
+  kill(sz){const n=performance.now(); if(n-lastKillSnd<45)return; lastKillSnd=n;
+           const p=Math.max(0.5,1.4-sz/60); tone(300*p,90*p,0.13,'triangle',0.20); burst(1500,0.06,0.12); },
+  crit(){  tone(880,1500,0.09,'sawtooth',0.16); },
+  boom(){  burst(260,0.34,0.42); tone(120,40,0.3,'sine',0.25); },
+  hurt(){  tone(220,55,0.28,'sawtooth',0.35); burst(500,0.16,0.3); },
+  upgrade(){[0,0.07,0.14].forEach((d,i)=>tone(520+i*220,0,0.12,'triangle',0.18,d)); },
+  bossWarn(){tone(70,190,1.1,'sawtooth',0.32); burst(180,0.7,0.18); },
+  purge(){ tone(50,150,1.6,'sawtooth',0.45); burst(140,1.2,0.25);
+           [0,0.25,0.5].forEach(d=>tone(90,60,0.3,'square',0.3,d)); },
+  clear(){ [523,659,784,1047].forEach((f,i)=>tone(f,f,0.28,'triangle',0.22,i*0.13)); },
+  over(){  [400,320,250,180].forEach((f,i)=>tone(f,f*0.8,0.3,'sawtooth',0.22,i*0.14)); },
+};
+// 히트스톱 — 타격 순간 화면을 몇 프레임 정지시킨다. 타격감의 핵심.
+let hitStop=0;
+const HITSTOP_MAX=14;
+function freeze(n){ hitStop=Math.min(hitStop+n,HITSTOP_MAX); }
+
 // Helpers
 function dst(x1,y1,x2,y2){return Math.sqrt((x2-x1)**2+(y2-y1)**2);}
 function spP(x,y,c,n=6){if(parts.length>400)return;for(let i=0;i<Math.min(n,400-parts.length);i++){const a=Math.random()*Math.PI*2,s=Math.random()*5+1;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:1,dc:.04+Math.random()*.03,c,sz:2+Math.random()*2});}}
@@ -301,6 +368,11 @@ function dOb(i){
   if(i>=obs.length)return;
   const ob=obs[i];
   spB(ob.x,ob.y,ob.col,ob.isBoss?40:18);
+  // 처치 피드백 — 상황에 따라 흔들림·정지·소리의 세기를 다르게 준다
+  if(ob.isPurge){shK=Math.max(shK,30);freeze(14);SFX.boom();SFX.purge();}
+  else if(ob.isBoss){shK=Math.max(shK,ob.isMega?24:16);freeze(8);SFX.boom();}
+  else if(ob.typ==='bomber'){shK=Math.max(shK,8);SFX.boom();}
+  else {shK=Math.max(shK,2);SFX.kill(ob.size);}
   if(ob.typ==='bomber'){spB(ob.x,ob.y,'#ff9e00',28);for(let j=obs.length-1;j>=0;j--){if(j!==i&&j<obs.length&&dst(ob.x,ob.y,obs[j].x,obs[j].y)<80){obs[j].hp-=3;if(obs[j].hp<=0)dOb(j);}}}
   if(its.length<30&&Math.random()<.3)its.push(new Item());
   if(ob.isBoss&&Math.random()<.7)for(let k=0;k<3&&its.length<30;k++)its.push(new Item());
@@ -312,7 +384,7 @@ function dOb(i){
   comboMultiplier=1+Math.floor(combo/comboDivider)*0.2;
   const pts=Math.floor(basePts*comboMultiplier);
   score+=pts;xp+=basePts;kills++;
-  if(kills%15===0&&kills>0)floatTexts.push({txt:`🔥 ${kills} KILLS!`,x:W/2,y:H/2-40,life:100,col:'#ffd60a',size:20});
+  if(kills%15===0&&kills>0){floatTexts.push({txt:`🔥 ${kills} KILLS!`,x:W/2,y:H/2-40,life:100,col:'#ffd60a',size:20});SFX.crit();shK=Math.max(shK,6);}
   // Float text
   const comboTxt=combo>=5?`x${combo} COMBO! +${pts}`:`+${pts}`;
   floatTexts.push({x:ob.x,y:ob.y,txt:comboTxt,life:60,
@@ -374,7 +446,7 @@ class Player{
       for(const o of obs){const d=dst(this.x,this.y,o.x,o.y);if(d<nd){nd=d;nx=o.x;ny=o.y;}}
       this.ang=Math.atan2(ny-this.y,nx-this.x);
     } else this.ang=Math.atan2(mY-this.y,mX-this.x);
-    this.gt++;if(this.gt>=this.gc){this.gt=0;this.fire();}
+    this.gt++;if(this.gt>=this.gc){this.gt=0;this.fire();SFX.shoot();}
     if(this.shld>0)this.shld--;if(this.sla>0)this.sla--;if(this.inv>0)this.inv--;
     this.aa+=.035;this.orbAngle+=.055;this.droneAngle+=.04;
     // Regen
@@ -492,7 +564,7 @@ class Player{
       }
       spP(this.x,this.y,'#3a86ff',8);return false;
     }
-    this.hp--;this.inv=90;shK=16;uHP();spB(this.x,this.y,'#ff2d55',18);
+    this.hp--;this.inv=90;shK=16;freeze(6);SFX.hurt();uHP();spB(this.x,this.y,'#ff2d55',18);
     if(this.hp<=0){
       if(this.phoenix){
         this.phoenix=false;this.hp=3;this.inv=200;uHP();
@@ -693,7 +765,7 @@ class Item{
 
 // ── BOMB ──────────────────────────────────────────────────
 function triggerBomb(){
-  spB(W/2,H/2,'#ff6b35',50);
+  spB(W/2,H/2,'#ff6b35',50);shK=Math.max(shK,14);freeze(4);SFX.boom();
   for(let i=obs.length-1;i>=0;i--){
     const o=obs[i];if(dst(W/2,H/2,o.x,o.y)<200){o.hp-=player.bd*3;if(o.hp<=0)dOb(i);}
   }
@@ -744,6 +816,7 @@ function checkBossSpawn(){
 }
 
 function showBossWarn(txt,col){
+  if(txt.indexOf('PURGE')>=0)SFX.purge();else SFX.bossWarn();
   bossWarnE.textContent=txt;bossWarnE.style.color=col;bossWarnE.style.opacity='1';
   setTimeout(()=>bossWarnE.style.opacity='0',2500);
 }
@@ -756,6 +829,8 @@ function gLoop(ts=0){
   // Lag protection
   const delta=ts-lastTime;lastTime=ts;
   if(lastTime>500&&delta>250){aId=requestAnimationFrame(gLoop);return;}
+  // 히트스톱 — 시뮬레이션과 시계를 함께 멈춘다. 캔버스는 지우지 않으므로 마지막 프레임이 남는다.
+  if(hitStop>0){hitStop--;aId=requestAnimationFrame(gLoop);return;}
   fC++;if(fC>200000)fC=1;
   gameT=fC/60;   // 게임 전체가 프레임 기반이므로 시계도 프레임에서 뽑는다
   const left=Math.max(0,RUN_SEC-gameT);
@@ -1010,6 +1085,7 @@ function showUpg(){
     const stk=u.once?'':` <span style="opacity:.5;font-size:10px">${stackCount(u.id)+1}/${STACK_MAX}</span>`;
     card.innerHTML=`<div class="ui2">${u.icon}</div><div class="ui3"><div class="un">${u.name}${stk}</div><div class="ud">${u.desc}</div></div><div class="ur ${rc[u.r]}">${u.r.toUpperCase()}</div>`;
     card.onclick=()=>{
+      SFX.upgrade();
       u.ef(player);
       appliedUpgradeIds.add(u.id);
       appliedUpgradeLog.push(u);
@@ -1063,6 +1139,7 @@ function uHP(){
 }
 
 function startGame(){
+  initAudio();
   gR=true;score=0;xp=0;wave=1;kills=0;bossKills=0;cE=0;luS=0;fC=0;shK=0;
   nextUpgradeScore=Math.max(180,200-pd.expL*10);
   gameT=0;purgeSpawned=false;purgeKilled=false;nextBossAt=60;nextMegaAt=180;bossActive=false;bossKillCount=0;
@@ -1105,6 +1182,7 @@ function runClear(){
   sP();
   fillReport();
   const t=document.getElementById('gt');
+  SFX.clear();
   t.textContent=purgeKilled?'PURGE ELIMINATED':'PROTOCOL SURVIVED';
   t.style.color=purgeKilled?'var(--gld)':'var(--acc)';
   document.getElementById('gsub').textContent=purgeKilled
@@ -1120,6 +1198,7 @@ function gameOver(){
   gR=false;cancelAnimationFrame(aId);
   if(freezeTimer)clearInterval(freezeTimer);
   isFrozen=false;freezeOverlay.classList.remove('show');
+  SFX.over();
   pd.credits+=cE;sP();
   fillReport();
   const t=document.getElementById('gt');
@@ -1132,7 +1211,7 @@ function gameOver(){
 }
 
 // ── INPUT ─────────────────────────────────────────────────
-window.addEventListener('keydown',e=>{keys[e.key]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();});
+window.addEventListener('keydown',e=>{if(e.key==='m'||e.key==='M')toggleMute();keys[e.key]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();});
 window.addEventListener('keyup',e=>{keys[e.key]=false;});
 cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mX=(e.clientX-r.left)*(W/r.width);mY=(e.clientY-r.top)*(H/r.height);});
 cv.addEventListener('touchmove',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),t=e.touches[0];mX=(t.clientX-r.left)*(W/r.width);mY=(t.clientY-r.top)*(H/r.height);},{passive:false});
@@ -1178,7 +1257,7 @@ function showEmerButtons(){
   if(emerTimer)clearTimeout(emerTimer);
   emerTimer=setTimeout(()=>{em.style.opacity='1';em.style.pointerEvents='auto';},3000);
 }
-document.getElementById('stb').onclick=startGame;
+document.getElementById('stb').onclick=()=>{initAudio();startGame();};
 document.getElementById('reb').onclick=startGame;
 document.getElementById('reb2').onclick=()=>{
   const savedIds=new Set(appliedUpgradeIds);
@@ -1196,6 +1275,7 @@ document.getElementById('hob').onclick=()=>{layers.g.classList.add('hidden');lay
 
 // ── INIT ──────────────────────────────────────────────────
 tcdE.textContent=pd.credits;
+{const el=document.getElementById('mute');if(el)el.textContent=pd.mute?'🔇':'🔊';}
 </script>
 </body>
 </html>
