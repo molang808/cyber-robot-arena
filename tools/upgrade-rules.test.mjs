@@ -29,7 +29,8 @@ const RARITY_WEIGHT = { common: 10, rare: 4, epic: 2, legendary: 1 };
 function available(taken, counts) {
   return UPGRADES.filter(u => {
     if (u.once && taken.has(u.id)) return false;
-    if (u.req && !taken.has(u.req)) return false;
+    const rq = u.req ? (Array.isArray(u.req) ? u.req : [u.req]) : [];
+    if (rq.some(r => !taken.has(r))) return false;
     if (!u.once && (counts.get(u.id) || 0) >= STACK_MAX) return false;
     return true;
   });
@@ -56,19 +57,27 @@ test('1회성 업그레이드는 한 번 먹으면 다시 안 나온다', () => 
   assert.ok(!available(taken, new Map()).some(u => u.id === once.id));
 });
 
-test('선행 조건: req가 충족되기 전에는 후보에 없다', () => {
-  const dep = UPGRADES.find(u => u.req);
-  assert.ok(dep, 'req를 가진 업그레이드가 있어야 한다');
-  assert.ok(!available(new Set(), new Map()).some(u => u.id === dep.id),
-    '선행 업그레이드 없이는 등장하면 안 된다');
-  assert.ok(available(new Set([dep.req]), new Map()).some(u => u.id === dep.id),
-    '선행 업그레이드를 먹으면 등장해야 한다');
+test('선행 조건: req가 충족되기 전에는 후보에 없다 (단일·복수 모두)', () => {
+  const deps = UPGRADES.filter(u => u.req);
+  assert.ok(deps.length, 'req를 가진 업그레이드가 있어야 한다');
+  for (const dep of deps) {
+    const rq = Array.isArray(dep.req) ? dep.req : [dep.req];
+    assert.ok(!available(new Set(), new Map()).some(u => u.id === dep.id),
+      `${dep.id}가 선행 조건 없이 등장한다`);
+    // 조건을 하나만 채우면 아직 나오면 안 된다
+    if (rq.length > 1)
+      assert.ok(!available(new Set([rq[0]]), new Map()).some(u => u.id === dep.id),
+        `${dep.id}가 선행 조건을 일부만 채웠는데 등장한다`);
+    assert.ok(available(new Set(rq), new Map()).some(u => u.id === dep.id),
+      `${dep.id}가 선행 조건을 다 채웠는데 등장하지 않는다`);
+  }
 });
 
 test('모든 req는 실제로 존재하는 업그레이드를 가리킨다', () => {
   const ids = new Set(UPGRADES.map(u => u.id));
   for (const u of UPGRADES.filter(x => x.req))
-    assert.ok(ids.has(u.req), `${u.id}의 선행 조건 ${u.req}가 카탈로그에 없다`);
+    for (const r of (Array.isArray(u.req) ? u.req : [u.req]))
+      assert.ok(ids.has(r), `${u.id}의 선행 조건 ${r}가 카탈로그에 없다`);
 });
 
 test('업그레이드 id는 중복되지 않는다', () => {
@@ -121,6 +130,15 @@ test('해금: id는 중복되지 않고 목표치는 양수다', () => {
   const U = loadUnlocks(EMPTY_PD);
   assert.equal(new Set(U.map(u => u.id)).size, U.length);
   for (const u of U) assert.ok(u.max > 0, `${u.id}의 목표치가 0 이하`);
+});
+
+test('진화: 진화형이 가리키는 wt 분기가 fire()에 존재한다', () => {
+  const evos = UPGRADES.filter(u => u.id.startsWith('ev_'));
+  assert.ok(evos.length >= 4, '진화형이 4종 이상이어야 한다');
+  for (const e of evos) {
+    assert.ok(src.includes(`wt==='${e.id}'`), `fire()에 ${e.id} 분기가 없다`);
+    assert.ok(Array.isArray(e.req) && e.req.length === 2, `${e.id}의 재료는 2개여야 한다`);
+  }
 });
 
 test('해금: 무기 슬롯이 가리키는 무기가 fire()에 실제로 존재한다', () => {

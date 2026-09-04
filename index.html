@@ -329,6 +329,14 @@ const UPGRADES=[
   {id:'vampire',name:'흡혈 탄환',icon:'🩸',desc:'매 적 처치마다 크레딧 보너스',r:'rare',once:true,ef:p=>p.vampire=true},
   {id:'supermagnet',name:'초강력 자석',icon:'🌀',desc:'코인 자동 흡수 (범위 무제한)',r:'epic',once:true,ef:p=>p.superMagnet=true},
   {id:'bomb_drop',name:'폭탄 낙하',icon:'💥',desc:'5초마다 화면 중앙에 폭탄 낙하',r:'epic',once:true,ef:p=>p.bombDrop=true},
+  // ── 진화 ──
+  // 무기 + 특정 패시브를 함께 갖췄을 때만 등장한다. 등급 내 DPS를 평준화하면서
+  // 사라진 '대박 무기' 순간을 여기서 돌려준다. 목표 DPS는 legendary(220)의 약 1.8배.
+  {id:'ev_shotgun',name:'스프레드 랜스',icon:'🔱',desc:'진화 — 9방향 전탄 관통',r:'legendary',once:true,req:['shotgun','piercing'],ef:p=>{p.wt='ev_shotgun';p.gc=30;p.pr=true;}},
+  {id:'ev_rail',name:'궤도포',icon:'🛰️',desc:'진화 — 광폭 관통 + 착탄 폭발',r:'legendary',once:true,req:['rail','bullet_spd'],ef:p=>{p.wt='ev_rail';p.gc=44;}},
+  {id:'ev_flame',name:'열충격',icon:'🌋',desc:'진화 — 초근접 고열 분사',r:'legendary',once:true,req:['flame','slow_field'],ef:p=>{p.wt='ev_flame';p.gc=4;}},
+  {id:'ev_missile',name:'군집 미사일',icon:'☄️',desc:'진화 — 2연장 유도 폭발',r:'legendary',once:true,req:['missile','explosive'],ef:p=>{p.wt='ev_missile';p.gc=24;p.hm=true;p.ae=true;}},
+
   {id:'drone',name:'드론 소환',icon:'🤖',desc:'주위를 따라다니는 공격 드론',r:'legendary',once:true,ef:p=>p.drone=true},
 ];
 
@@ -570,6 +578,22 @@ class Player{
       for(let i=0;i<this.xb;i++)buls.push(mk(a+(Math.random()-.5)*spread*2,spd*1.2,dmg*.75,4,'#ffaa00',100));
     } else if(wt==='cannon'){
       const b=mk(a,spd*.55,dmg*11,15,'#9b59b6');b.gravity=true;b.life=220;buls.push(b);
+    } else if(wt==='ev_shotgun'){
+      const n=9+this.xb;
+      for(let i=0;i<n;i++){const b=mk(a+(i-n/2)*.13,spd*.95,dmg*2.4,5,'#ffd166');b.pr=true;buls.push(b);}
+    } else if(wt==='ev_rail'){
+      bms.push({x:this.x,y:this.y,ang:a,life:12,dmg:dmg*15,col:'#8ecae6',wide:true});
+    } else if(wt==='ev_flame'){
+      const n=Math.min(10+this.xb*2,20);
+      if(buls.length<220)for(let i=0;i<n;i++){const fa=a+(Math.random()-.5)*.9,fs=spd*(.6+Math.random()*.6);
+        buls.push(mk(fa,fs,dmg*1.0,4+Math.random()*5,`hsl(${Math.random()*30},100%,65%)`,34+Math.random()*26));}
+    } else if(wt==='ev_missile'){
+      for(let k=0;k<2;k++){
+        const b=mk(a+(k?.16:-.16),spd*1.15,dmg*3.3,12,'#ff9f1c');
+        b.hm=true;b.explosive=true;b.life=320;b.explodeRadius=150;b.cluster=true;buls.push(b);
+      }
+      for(let i=0;i<this.xb;i++){const b2=mk(a+(i+1)*.3*(i%2?-1:1),spd*1.15,dmg*3.3,12,'#ff9f1c');
+        b2.hm=true;b2.explosive=true;b2.life=320;b2.explodeRadius=150;b2.cluster=true;buls.push(b2);}
     } else if(wt==='chain'){
       // Chain lightning — hits nearest, then jumps
       if(obs.length>0){
@@ -1106,7 +1130,8 @@ function showUpg(){
     div.innerHTML='';
     const available=UPGRADES.filter(u=>{
       if(u.once&&appliedUpgradeIds.has(u.id))return false;
-      if(u.req&&!appliedUpgradeIds.has(u.req))return false;
+      const rq=u.req?(Array.isArray(u.req)?u.req:[u.req]):[];
+      if(rq.some(r=>!appliedUpgradeIds.has(r)))return false;
       if(!u.once&&stackCount(u.id)>=STACK_MAX)return false;   // 중첩 상한
       return true;
     });

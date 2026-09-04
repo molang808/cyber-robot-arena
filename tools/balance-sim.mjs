@@ -103,6 +103,11 @@ const WEAPON_DPS = {
   gatling:  { dmg: (d, xb) => d * 0.75 * (1 + xb),         crit: true,  hit: 0.85, multi: 1.0 },
   cannon:   { dmg: (d)     => d * 11,                      crit: false, hit: 1.0,  multi: 3.0 },
   chain:    { dmg: (d, xb) => d * 2.7 * (4 + xb),               crit: false, hit: 1.0,  multi: 1.0 },
+  // 진화형 — 무기 + 패시브 조합으로만 열린다
+  ev_shotgun:{dmg: (d, xb) => d * 2.4 * (9 + xb),               crit: true,  hit: 0.5,  multi: 2.5 },
+  ev_rail:  { dmg: (d)     => d * 15,                           crit: false, hit: 1.0,  multi: 4.0 },
+  ev_flame: { dmg: (d, xb) => d * 1.0 * Math.min(10 + xb * 2, 20), crit: true, hit: 0.3, multi: 1.0 },
+  ev_missile:{dmg:(d, xb) => d * 3.3 * (2 + xb),                crit: true,  hit: 1.0,  multi: 2.0 },
 };
 
 // ── 플레이어 초기 상태 (Player 생성자, 영구 강화 0단계 기준) ────
@@ -186,7 +191,8 @@ function parseCap(str) {
 function draft(upgrades, takenIds, counts, rng, cap) {
   const available = upgrades.filter(u => {
     if (u.once && takenIds.has(u.id)) return false;
-    if (u.req && !takenIds.has(u.req)) return false;
+    const rq = u.req ? (Array.isArray(u.req) ? u.req : [u.req]) : [];
+    if (rq.some(r => !takenIds.has(r))) return false;
     if (cap.mode === 'stack' && (counts.get(u.id) || 0) >= cap.k) return false;
     if (cap.stackK && (counts.get(u.id) || 0) >= cap.stackK) return false;
     if (cap.mode === 'mult' && MULT_AXES.has(u.id) && (counts.get(u.id) || 0) >= cap.k) return false;
@@ -319,7 +325,8 @@ const upgrades = loadUpgrades();
 // ── 진단: 무기별 고유 DPS 편차 ──
 if (args.includes('--weapons')) {
   const BASE_GC = { pistol:22, plasma:20, shotgun:32, laser:44, dualgun:20, sniper:55,
-                    flame:4, ricochet:22, missile:26, rail:50, gatling:5, cannon:45, chain:22 };
+                    flame:4, ricochet:22, missile:26, rail:50, gatling:5, cannon:45, chain:22,
+                    ev_shotgun:30, ev_rail:44, ev_flame:4, ev_missile:24 };
   const bd = Number(flag('bd', 5)), xb = Number(flag('xb', 2));
   console.log(`\n  무기별 고유 DPS — 데미지 bd=${bd}, 추가탄환 xb=${xb}, 각 무기 고유 쿨다운, 연사 업그레이드 없음\n`);
   console.log('  무기        쿨다운   초당발사   발사당(유효)      DPS   기준 대비');
