@@ -116,7 +116,9 @@ button{padding:9px 24px;font-family:'Orbitron',sans-serif;font-size:11px;font-we
     <button class="bp" id="stb">전투 시작</button>
     <button class="bs" id="shb">영구 상점</button>
     <div class="dv"></div>
-    <div style="font-size:10px;color:rgba(255,255,255,0.2);text-align:center;line-height:2;letter-spacing:1px;">WASD / 방향키 이동 &nbsp;|&nbsp; 자동 공격<br>200점마다 업그레이드 &nbsp;|&nbsp; 보스 처치 시 보너스</div>
+    <div id="career" style="font-size:10px;color:rgba(255,255,255,0.35);text-align:center;line-height:2.1;letter-spacing:1px;"></div>
+    <div class="dv"></div>
+    <div style="font-size:10px;color:rgba(255,255,255,0.2);text-align:center;line-height:2;letter-spacing:1px;">WASD / 방향키 이동 &nbsp;|&nbsp; 자동 공격 &nbsp;|&nbsp; M 음소거<br>10분 생존하면 클리어 &nbsp;|&nbsp; 8분에 최종 유닛 등장</div>
   </div></div>
 
   <!-- SHOP -->
@@ -393,7 +395,7 @@ function dOb(i){
   if(ob.isBoss)bossKills++;
   scE.textContent=score;
   if(player&&player.lc&&Math.random()<.1){player.hp=Math.min(player.hp+1,player.mhp);uHP();}
-  if(player&&player.vampire){const bonus=Math.floor(5*comboMultiplier);cE+=bonus;crE.textContent=`💫 ${cE}`;}
+  if(player&&player.vampire){const bonus=5;cE+=bonus;crE.textContent=`💫 ${cE}`;}
   obs.splice(i,1);
 }
 
@@ -980,7 +982,7 @@ function gLoop(ts=0){
     const it=its[i];it.update();it.draw();
     if(dst(player.x,player.y,it.x,it.y)<player.rad+11){
       const t=it.type.n;
-      if(t==='coin'){const v=Math.floor((Math.random()*55+10)*player.cm*comboMultiplier);cE+=v;crE.textContent=`\uD83D\uDCAB ${cE}`;floatTexts.push({txt:`+${v}`,x:it.x,y:it.y-10,life:45,col:'#ffd60a',size:13});}
+      if(t==='coin'){const v=Math.floor((Math.random()*55+10)*player.cm);cE+=v;crE.textContent=`\uD83D\uDCAB ${cE}`;floatTexts.push({txt:`+${v}`,x:it.x,y:it.y-10,life:45,col:'#ffd60a',size:13});}
       else if(t==='heal'){player.hp=Math.min(player.hp+1,player.mhp);uHP();}
       else if(t==='shield'){player.shld=200+player.shB;floatTexts.push({x:player.x,y:player.y-30,txt:'SHIELD!',life:55,col:'#3a86ff',size:13});}
       else if(t==='slow'){player.sla=(200+player.shB)*player.sm;}
@@ -1112,16 +1114,16 @@ function showShop(){
   scdE.textContent=pd.credits;
   const list=document.getElementById('sli');list.innerHTML='';
   const items=[
-    {id:'hpL',name:'장갑 업그레이드',desc:`최대 체력 +1 (Lv.${pd.hpL})`,base:150},
-    {id:'spL',name:'이동 부스터',desc:`이동 속도 +0.3 (Lv.${pd.spL})`,base:120},
-    {id:'mgL',name:'자석 모듈',desc:`흡수 범위 +30 (Lv.${pd.mgL})`,base:100},
-    {id:'cbL',name:'데이터 마이닝',desc:`크레딧 +20% (Lv.${pd.cbL})`,base:130},
-    {id:'dmL',name:'화력 강화 칩',desc:`탄환 데미지 +1 (Lv.${pd.dmL})`,base:180},
-    {id:'auL',name:'전기장 모듈',desc:`전기 오라 +1 (Lv.${pd.auL})`,base:220},
-    {id:'orbL',name:'검 궤도 확대',desc:`공전 검 궤도 반경 +15 (Lv.${pd.orbL})`,base:160},
-    {id:'reloadL',name:'장전 보조',desc:`발사 쿨다운 -5% (Lv.${pd.reloadL})`,base:200},
-    {id:'startHpL',name:'초기 장갑',desc:`시작 반경 +1 (Lv.${pd.startHpL})`,base:250},
-    {id:'expL',name:'경험치 증폭',desc:`업그레이드 간격 -10점 (Lv.${pd.expL})`,base:170},
+    {id:'hpL',name:'장갑 업그레이드',desc:`최대 체력 +1 (Lv.${pd.hpL})`,base:9600},
+    {id:'spL',name:'이동 부스터',desc:`이동 속도 +0.3 (Lv.${pd.spL})`,base:960},
+    {id:'mgL',name:'자석 모듈',desc:`흡수 범위 +30 (Lv.${pd.mgL})`,base:800},
+    {id:'cbL',name:'데이터 마이닝',desc:`크레딧 +20% (Lv.${pd.cbL})`,base:1040},
+    {id:'dmL',name:'화력 강화 칩',desc:`탄환 데미지 +1 (Lv.${pd.dmL})`,base:1440},
+    {id:'auL',name:'전기장 모듈',desc:`전기 오라 +1 (Lv.${pd.auL})`,base:1760},
+    {id:'orbL',name:'검 궤도 확대',desc:`공전 검 궤도 반경 +15 (Lv.${pd.orbL})`,base:1280},
+    {id:'reloadL',name:'장전 보조',desc:`발사 쿨다운 -5% (Lv.${pd.reloadL})`,base:1600},
+    {id:'startHpL',name:'초기 장갑',desc:`시작 반경 +1 (Lv.${pd.startHpL})`,base:2000},
+    {id:'expL',name:'경험치 증폭',desc:`업그레이드 간격 -10점 (Lv.${pd.expL})`,base:1360},
   ];
   items.forEach(item=>{
     const cost=(pd[item.id]+1)*item.base;
@@ -1160,6 +1162,32 @@ function startGame(){
   aId=requestAnimationFrame(gLoop);
 }
 
+// 판이 끝날 때마다 계정 단위 기록을 쌓는다.
+// 한 판의 결과가 다음 판으로 이어진다는 감각은 크레딧만으로는 안 생긴다.
+function recordRun(){
+  pd.runs=(pd.runs||0)+1;
+  pd.kills=(pd.kills||0)+kills;
+  pd.best=Math.max(pd.best||0,score);
+  pd.bestT=Math.max(pd.bestT||0,Math.floor(gameT));
+  pd.bestW=Math.max(pd.bestW||0,wave);
+  pd.bosses=(pd.bosses||0)+bossKills;
+  sP();
+}
+
+function renderCareer(){
+  const el=document.getElementById('career');if(!el)return;
+  const mm=Math.floor((pd.bestT||0)/60),ss=String((pd.bestT||0)%60).padStart(2,'0');
+  const rows=[
+    ['전투 횟수', (pd.runs||0).toLocaleString()],
+    ['누적 처치', Math.round(pd.kills||0).toLocaleString()],
+    ['보스 처치', (pd.bosses||0).toLocaleString()],
+    ['최고 점수', (pd.best||0).toLocaleString()],
+    ['최장 생존', `${mm}:${ss}`],
+    ['클리어', `${pd.clears||0}회${pd.purges?` (완전 제압 ${pd.purges})`:''}`],
+  ];
+  el.innerHTML=rows.map(([k,v])=>`<span style="opacity:.55">${k}</span> <span style="color:var(--acc)">${v}</span>`).join(' &nbsp;·&nbsp; ');
+}
+
 function fillReport(){
   const mm=Math.floor(gameT/60),ss=String(Math.floor(gameT%60)).padStart(2,'0');
   document.getElementById('ft').textContent=`${mm}:${ss}`;
@@ -1176,6 +1204,7 @@ function runClear(){
   gR=false;cancelAnimationFrame(aId);
   if(freezeTimer)clearInterval(freezeTimer);
   isFrozen=false;freezeOverlay.classList.remove('show');
+  recordRun();
   cE=Math.floor(cE*(purgeKilled?2:1.5));   // 클리어 보너스 (완전 제압이면 2배)
   pd.credits+=cE;pd.clears=(pd.clears||0)+1;
   if(purgeKilled)pd.purges=(pd.purges||0)+1;
@@ -1199,6 +1228,7 @@ function gameOver(){
   if(freezeTimer)clearInterval(freezeTimer);
   isFrozen=false;freezeOverlay.classList.remove('show');
   SFX.over();
+  recordRun();
   pd.credits+=cE;sP();
   fillReport();
   const t=document.getElementById('gt');
@@ -1229,7 +1259,7 @@ function emergencyRestart(goHome){
     cE=0;
     Object.values(layers).forEach(l=>l.classList.add('hidden'));
     layers.s.classList.remove('hidden');
-    tcdE.textContent=pd.credits;
+    tcdE.textContent=pd.credits;renderCareer();
   } else {
     // Restart keeping upgrades
     restartKeepUpgrades();
@@ -1270,11 +1300,11 @@ document.getElementById('reb2').onclick=()=>{
   wnE.textContent=player.wt.toUpperCase();
 };
 document.getElementById('shb').onclick=showShop;
-document.getElementById('sbb').onclick=()=>{layers.sh.classList.add('hidden');layers.s.classList.remove('hidden');};
-document.getElementById('hob').onclick=()=>{layers.g.classList.add('hidden');layers.s.classList.remove('hidden');tcdE.textContent=pd.credits;};
+document.getElementById('sbb').onclick=()=>{layers.sh.classList.add('hidden');layers.s.classList.remove('hidden');renderCareer();};
+document.getElementById('hob').onclick=()=>{layers.g.classList.add('hidden');layers.s.classList.remove('hidden');tcdE.textContent=pd.credits;renderCareer();};
 
 // ── INIT ──────────────────────────────────────────────────
-tcdE.textContent=pd.credits;
+tcdE.textContent=pd.credits;renderCareer();
 {const el=document.getElementById('mute');if(el)el.textContent=pd.mute?'🔇':'🔊';}
 </script>
 </body>

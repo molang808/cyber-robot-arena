@@ -50,6 +50,13 @@ function loadStackMax() {
 }
 const GAME_STACK_MAX = loadStackMax();
 
+// 메타 진행 — 판당 크레딧 축적량
+// 적 처치 시 30% 확률로 아이템, 그중 코인이 가중치 14/24, 코인 값은 random(10~65).
+const ITEM_DROP = 0.30, COIN_SHARE = 14 / 24, COIN_AVG = 37.5;
+// 영구 상점 10라인의 기준가 (showShop과 동일)
+const SHOP_BASE = [1200, 960, 800, 1040, 1440, 1760, 1280, 1600, 2000, 1360];
+const shopCostToLevel = lv => SHOP_BASE.reduce((s, b) => s + b * (lv * (lv + 1) / 2), 0);
+
 // 런 종료 조건 (index.html과 동일하게 유지할 것)
 const RUN_SEC = 600;      // 10분 생존 = 클리어
 const PURGE_SEC = 480;    // 8분에 최종 유닛 등장
@@ -223,7 +230,7 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
   const p = newPlayer();
   const taken = new Set();
   const counts = new Map();
-  let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0), picks = 0;
+  let score = 0, xp = 0, t = 0, combo = 0, nextUpg = upgGap(0), picks = 0, credits = 0, totalKills = 0;
   const samples = [];
   let breakPoint = null;   // 처리량 여유가 3배를 넘어선 첫 시점
 
@@ -243,6 +250,8 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
 
     score += kills * pr.avgPts * comboMult;   // 표시용 — 콤보 포함
     xp    += kills * pr.avgPts;                // 성장용 — 콤보 미적용
+    totalKills += kills;
+    credits += kills * ITEM_DROP * COIN_SHARE * COIN_AVG;   // 콤보 배수는 붙지 않는다
 
     if (headroom >= 3 && breakPoint === null && t > 5) {
       breakPoint = { t, score: Math.round(score), picks, headroom };
@@ -278,7 +287,7 @@ function simulate(upgrades, { strategy, rng, maxSeconds = 3600, accuracy = DEFAU
     purge = { dps: atPurge.dps, ttk, killable: ttk <= RUN_SEC - PURGE_SEC,
               megaTtk: megaHP(PURGE_SEC) / dpsOnPurge, bossTtk: bossHP(PURGE_SEC) / dpsOnPurge };
   }
-  return { samples, breakPoint, final: p, picks, purge };
+  return { samples, breakPoint, final: p, picks, purge, credits: Math.round(credits), kills: Math.round(totalKills) };
 }
 
 // ── 실행 ──────────────────────────────────────────────────────
@@ -510,6 +519,16 @@ if (pgs.length) {
   console.log(`    격파 가능한 판: ${killable}/${pgs.length} (${(killable / pgs.length * 100).toFixed(0)}%)`);
   console.log(`    처치 소요 시간 중앙값: ${median(pgs.map(x => x.ttk)).toFixed(0)}초`);
   console.log(`    같은 시점 참고 — 메가 보스 ${median(pgs.map(x => x.megaTtk)).toFixed(0)}초 / 일반 보스 ${median(pgs.map(x => x.bossTtk)).toFixed(0)}초`);
+}
+
+// 메타 진행 — 판당 크레딧과 상점 만렙까지 걸리는 판 수
+const creds = runs.map(r => r.credits);
+const medCred = median(creds);
+console.log(`\n  메타 진행 (판당 10분 완주 기준)`);
+console.log(`    판당 크레딧 중앙값: ${medCred.toLocaleString()}  (처치 ${Math.round(median(runs.map(r => r.kills))).toLocaleString()}마리)`);
+for (const lv of [1, 3, 5]) {
+  const cost = shopCostToLevel(lv);
+  console.log(`    10라인 전부 Lv.${lv} 달성 비용 ${cost.toLocaleString()} → ${(cost / medCred).toFixed(1)}판`);
 }
 
 const bps = runs.map(r => r.breakPoint).filter(Boolean);
