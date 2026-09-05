@@ -218,7 +218,8 @@ test('타이틀 복귀는 showTitle 한 곳만 쓰고, 거기서 크레딧을 �
 });
 
 test('자동 전투 보상은 페이지 로드에서 한 번만 계산된다', () => {
-  const calls = src.split('showIdle(claimIdle())').length - 1;
+  // 호출 형태가 아니라 호출 횟수를 본다. 정의부(function claimIdle(){)는 제외한다.
+  const calls = [...src.matchAll(/(?<!function )claimIdle\(\)/g)].length;
   assert.equal(calls, 1, `방치 보상 계산이 ${calls}곳 — 로드 시점 한 번이어야 한다`);
   const emer = src.match(/function emergencyRestart\([\s\S]*?\n\}/)[0];
   assert.ok(!emer.includes('claimIdle'),
