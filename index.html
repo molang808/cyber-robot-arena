@@ -1332,6 +1332,16 @@ function showUnlocks(){
   });
 }
 
+// 타이틀로 돌아오는 모든 경로가 여기를 지난다.
+// 이전에는 세 곳에서 각자 갱신했고 상점에서 나오는 경로만 크레딧 갱신을 빠뜨려,
+// 영구 강화를 사고 나와도 메인의 금액이 그대로였다.
+function showTitle(){
+  Object.values(layers).forEach(l=>l.classList.add('hidden'));
+  layers.s.classList.remove('hidden');
+  tcdE.textContent=pd.credits;
+  renderCareer();
+}
+
 function renderCareer(){
   const el=document.getElementById('career');if(!el)return;
   const mm=Math.floor((pd.bestT||0)/60),ss=String((pd.bestT||0)%60).padStart(2,'0');
@@ -1418,10 +1428,7 @@ function emergencyRestart(goHome){
   if(goHome){
     pd.credits+=cE;sP();  // 코인 저장
     cE=0;
-    Object.values(layers).forEach(l=>l.classList.add('hidden'));
-    layers.s.classList.remove('hidden');
-    showIdle(claimIdle());
-tcdE.textContent=pd.credits;renderCareer();
+    showTitle();
   } else {
     // Restart keeping upgrades
     restartKeepUpgrades();
@@ -1463,9 +1470,9 @@ document.getElementById('reb2').onclick=()=>{
 };
 document.getElementById('shb').onclick=showShop;
 document.getElementById('akb').onclick=showUnlocks;
-document.getElementById('ukb').onclick=()=>{layers.k.classList.add('hidden');layers.s.classList.remove('hidden');renderCareer();};
-document.getElementById('sbb').onclick=()=>{layers.sh.classList.add('hidden');layers.s.classList.remove('hidden');renderCareer();};
-document.getElementById('hob').onclick=()=>{layers.g.classList.add('hidden');layers.s.classList.remove('hidden');tcdE.textContent=pd.credits;renderCareer();};
+document.getElementById('ukb').onclick=showTitle;
+document.getElementById('sbb').onclick=showTitle;
+document.getElementById('hob').onclick=showTitle;
 
 // 자리를 비운 시각을 놓치지 않도록 주기적으로도 남긴다
 setInterval(()=>{pd.lastSeen=Date.now();sP();},20000);
@@ -1473,7 +1480,8 @@ window.addEventListener('beforeunload',()=>{pd.lastSeen=Date.now();sP();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){pd.lastSeen=Date.now();sP();}});
 
 // ── INIT ──────────────────────────────────────────────────
-tcdE.textContent=pd.credits;renderCareer();
+showTitle();
+showIdle(claimIdle());   // 자동 전투 보상은 페이지를 열 때 한 번만 계산한다
 {const el=document.getElementById('mute');if(el)el.textContent=pd.mute?'🔇':'🔊';}
 </script>
 </body>

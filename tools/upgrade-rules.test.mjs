@@ -203,3 +203,24 @@ test('진화: 재료 힌트가 카드 렌더에 포함된다', () => {
   assert.match(src, /진화 개방/, '진화 완성 힌트가 없다');
   assert.match(src, /재료 —/, '재료 안내 힌트가 없다');
 });
+
+// ── 화면 전환 (플레이 중 발견된 버그의 회귀 방지) ──────────
+test('타이틀 복귀는 showTitle 한 곳만 쓰고, 거기서 크레딧을 갱신한다', () => {
+  const fn = src.match(/function showTitle\(\)\{[\s\S]*?\n\}/);
+  assert.ok(fn, 'showTitle이 없다');
+  assert.match(fn[0], /tcdE\.textContent=pd\.credits/,
+    'showTitle이 타이틀 크레딧 표시를 갱신하지 않는다');
+  assert.match(fn[0], /renderCareer\(\)/, 'showTitle이 누적 기록을 갱신하지 않는다');
+  // 상점·아머리·게임오버에서 나오는 세 경로가 각자 갱신하면 하나를 빠뜨리게 된다
+  for (const id of ['ukb', 'sbb', 'hob'])
+    assert.match(src, new RegExp(`getElementById\\('${id}'\\)\\.onclick=showTitle`),
+      `${id}(메인으로)가 showTitle을 쓰지 않는다 — 화면마다 갱신이 갈린다`);
+});
+
+test('자동 전투 보상은 페이지 로드에서 한 번만 계산된다', () => {
+  const calls = src.split('showIdle(claimIdle())').length - 1;
+  assert.equal(calls, 1, `방치 보상 계산이 ${calls}곳 — 로드 시점 한 번이어야 한다`);
+  const emer = src.match(/function emergencyRestart\([\s\S]*?\n\}/)[0];
+  assert.ok(!emer.includes('claimIdle'),
+    'emergencyRestart가 방치 보상을 계산한다 — 버튼을 누를 때마다 지급된다');
+});
