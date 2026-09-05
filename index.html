@@ -451,15 +451,23 @@ function spP(x,y,c,n=6){if(parts.length>400)return;for(let i=0;i<Math.min(n,400-
 function spB(x,y,c,n=12){if(parts.length>400)return;for(let i=0;i<Math.min(n,400-parts.length);i++){const a=Math.random()*Math.PI*2,s=Math.random()*8+2;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:1,dc:.022+Math.random()*.02,c,sz:3+Math.random()*3});}}
 
 function dOb(i){
-  if(i>=obs.length)return;
   const ob=obs[i];
+  // 봄버 연쇄가 재귀로 obs를 splice하면 인덱스가 밀린다.
+  // 같은 적이 두 번 처리되거나 엉뚱한 적이 지워지는 것을 막기 위해
+  // 처리 여부를 객체에 표시하고, 제거도 인덱스가 아니라 객체로 한다.
+  if(!ob||ob._dead)return;
+  ob._dead=true;
   spB(ob.x,ob.y,ob.col,ob.isBoss?40:18);
   // 처치 피드백 — 상황에 따라 흔들림·정지·소리의 세기를 다르게 준다
   if(ob.isPurge){shK=Math.max(shK,30);freeze(14);SFX.boom();SFX.purge();}
   else if(ob.isBoss){shK=Math.max(shK,ob.isMega?24:16);freeze(8);SFX.boom();}
   else if(ob.typ==='bomber'){shK=Math.max(shK,8);SFX.boom();}
   else {shK=Math.max(shK,2);SFX.kill(ob.size);}
-  if(ob.typ==='bomber'){spB(ob.x,ob.y,'#ff9e00',28);for(let j=obs.length-1;j>=0;j--){if(j!==i&&j<obs.length&&dst(ob.x,ob.y,obs[j].x,obs[j].y)<80){obs[j].hp-=3;if(obs[j].hp<=0)dOb(j);}}}
+  if(ob.typ==='bomber'){
+    spB(ob.x,ob.y,'#ff9e00',28);
+    const chain=obs.filter(o2=>o2!==ob&&!o2._dead&&dst(ob.x,ob.y,o2.x,o2.y)<80);
+    for(const o2 of chain){o2.hp-=3;if(o2.hp<=0){const k=obs.indexOf(o2);if(k>=0)dOb(k);}}
+  }
   if(its.length<30&&Math.random()<.3)its.push(new Item());
   if(ob.isBoss&&Math.random()<.7)for(let k=0;k<3&&its.length<30;k++)its.push(new Item());
   const basePts=ob.isPurge?2000:ob.isBoss?(ob.isMega?500:200):ob.typ==='tank'?60:ob.typ==='fast'?35:ob.typ==='bomber'?40:20;
@@ -480,7 +488,8 @@ function dOb(i){
   scE.textContent=score;
   if(player&&player.lc&&Math.random()<.1){player.hp=Math.min(player.hp+1,player.mhp);uHP();}
   if(player&&player.vampire){const bonus=5;cE+=bonus;crE.textContent=`💫 ${cE}`;}
-  obs.splice(i,1);
+  const _idx=obs.indexOf(ob);
+  if(_idx>=0)obs.splice(_idx,1);
 }
 
 // ── PLAYER ──────────────────────────────────────────────────
@@ -957,7 +966,10 @@ function gLoop(ts=0){
   drawBG();
 
   // Spawn enemies
-  const iv=Math.max(16,75-wave*4);
+  // 스폰 압박. 이전 값(기울기 4·하한 16)에서는 2분 이후 처리량 여유가 1.5~1.8로
+  // 적이 화면에 쌓이지 않아, 무기만 잘 고르면 조작 없이도 진행됐다.
+  // 여유가 런 내내 1 아래를 유지하도록 다시 잡았다 (tools/balance-sim.mjs --slope --floor).
+  const iv=Math.max(8,75-wave*6);
   const maxObs=Math.min(25+wave*3,80);
   const normalObsCount=obs.reduce((n,o)=>n+(o.isBoss?0:1),0);
   if(normalObsCount<maxObs){
@@ -1029,9 +1041,12 @@ function gLoop(ts=0){
                 buls.push({x:b.x,y:b.y,vx:Math.cos(ca)*7,vy:Math.sin(ca)*7,dmg:b.dmg*.5,size:5,color:'#ff9e00',life:55,pr:false,hm:false,explosive:false,bc:0});
               }
             }
-            const expTargets=[];
-            for(let k=obs.length-1;k>=0;k--){if(k!==j&&dst(b.x,b.y,obs[k].x,obs[k].y)<exR)expTargets.push(k);}
-            expTargets.forEach(k=>{if(k<obs.length){obs[k].hp-=b.dmg*.65;if(obs[k].hp<=0)dOb(k);}});
+            // 인덱스를 모아두면 첫 처치의 splice 이후 나머지가 엉뚱한 적을 가리킨다
+            const expTargets=obs.filter(o2=>o2!==o&&!o2._dead&&dst(b.x,b.y,o2.x,o2.y)<exR);
+            for(const o2 of expTargets){
+              o2.hp-=b.dmg*.65;
+              if(o2.hp<=0){const k=obs.indexOf(o2);if(k>=0)dOb(k);}
+            }
           }
           // re-check j after possible chain shifts
           const jAlive=obs.indexOf(o);

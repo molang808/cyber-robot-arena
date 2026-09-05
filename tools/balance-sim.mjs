@@ -58,6 +58,8 @@ const SHOP_BASE = [1200, 960, 800, 1040, 1440, 1760, 1280, 1600, 2000, 1360];
 const shopCostToLevel = lv => SHOP_BASE.reduce((s, b) => s + b * (lv * (lv + 1) / 2), 0);
 
 // 런 종료 조건 (index.html과 동일하게 유지할 것)
+const SPAWN_FLOOR = Number((process.argv.find(a=>a.startsWith('--floor='))||'--floor=8').split('=')[1]);
+const SPAWN_SLOPE = Number((process.argv.find(a=>a.startsWith('--slope='))||'--slope=6').split('=')[1]);
 const RUN_SEC = 600;      // 10분 생존 = 클리어
 const PURGE_SEC = 480;    // 8분에 최종 유닛 등장
 const purgeHP = t => Math.floor(900 + t * 6);
@@ -149,7 +151,7 @@ const DEFAULT_ACCURACY = 0.35;
 function pressure(t) {
   const wave = 1 + Math.floor(t / 15);
   const diff = 1 + t * 0.012;
-  const iv = Math.max(16, 75 - wave * 4);                     // 하한 16프레임
+  const iv = Math.max(SPAWN_FLOOR, 75 - wave * SPAWN_SLOPE);  // 스폰 간격
   const maxObs = Math.min(25 + wave * 3, 80);                 // 상한 80마리
   let spawnPerSec = 60 / iv;
   if (wave >= 3) spawnPerSec += 60 / (iv * 2 + 3);
