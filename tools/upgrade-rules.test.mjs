@@ -224,3 +224,12 @@ test('자동 전투 보상은 페이지 로드에서 한 번만 계산된다', (
   assert.ok(!emer.includes('claimIdle'),
     'emergencyRestart가 방치 보상을 계산한다 — 버튼을 누를 때마다 지급된다');
 });
+
+test('방치 보상은 타이틀을 그리기 전에 지급된다', () => {
+  const init = src.slice(src.indexOf('── INIT'));
+  const claim = init.indexOf('claimIdle()');
+  const title = init.indexOf('showTitle()');
+  assert.ok(claim >= 0 && title >= 0, 'INIT에 두 호출이 다 있어야 한다');
+  assert.ok(claim < title,
+    '타이틀을 먼저 그리면 방치 보상 지급 전 금액이 표시된 채 남는다');
+});

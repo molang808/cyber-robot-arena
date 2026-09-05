@@ -1480,8 +1480,11 @@ window.addEventListener('beforeunload',()=>{pd.lastSeen=Date.now();sP();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){pd.lastSeen=Date.now();sP();}});
 
 // ── INIT ──────────────────────────────────────────────────
+// 보상을 먼저 지급하고 나서 타이틀을 그린다.
+// 순서가 뒤집히면 지급 전 금액이 표시된 채로 남는다.
+const idleReport=claimIdle();   // 자동 전투 보상은 페이지를 열 때 한 번만 계산한다
 showTitle();
-showIdle(claimIdle());   // 자동 전투 보상은 페이지를 열 때 한 번만 계산한다
+showIdle(idleReport);
 {const el=document.getElementById('mute');if(el)el.textContent=pd.mute?'🔇':'🔊';}
 </script>
 </body>
